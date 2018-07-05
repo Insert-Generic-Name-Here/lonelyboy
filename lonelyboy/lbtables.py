@@ -1,4 +1,4 @@
-import pandas as import pd
+import pandas as pd
 
 def find_outlier_indices(df):
     quantiles = df.quantile([0.25, 0.75])
