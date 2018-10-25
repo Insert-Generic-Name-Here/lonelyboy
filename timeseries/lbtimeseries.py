@@ -1,4 +1,5 @@
 
+import pandas as pd
 import multiprocessing as mp
 import numpy as np
 import os
@@ -9,8 +10,7 @@ def find_lin_parts(x, skiplen = 5, include_zeros=False):
 	
 	xzer = np.argwhere(x==0)
 	xdif2=np.diff(x,n=2)
-	xdif2[abs(xdif2)<0.00004]=0 # consider numerical issues
-	xzerdif = np.argwhere(xdif2==0)
+	xdif2[abs(xdif2)<0.00004]=0 # consider numerical issues xzerdif = np.argwhere(xdif2==0)
 	if not include_zeros:
 		xlin = np.setdiff1d(xzerdif,xzer)
 		xlin =xlin.astype('int')
@@ -52,14 +52,13 @@ def find_zero_parts(x):
 
 
 
-import pandas as pd
 def detrending(X):
 	'''Return the detrended part of X and the separate trend'''
 	
 	if len(X.shape)==1:
 		X=X.reshape((X.shape[0],1))
 
-	Xd = np.zeros(X.shape)    
+		Xd = np.zeros(X.shape)    
 	Xt = np.zeros(X.shape)
 	
 	
@@ -77,4 +76,20 @@ def detrending(X):
 
 
 
+def find_outlier_indices(df):
+    quantiles = df.quantile([0.25, 0.75])
+    feature_outlier_indices = []
+    for feature in quantiles:
+        q25, q75 = quantiles[feature].values
+        iqr = q75 - q25
+        
+        outlier_indices = df.index[(df[feature] < q25 - (1.5 * iqr)) | (df[feature] > q75 + (1.5 * iqr))].tolist()
+        feature_outlier_indices.append((feature, outlier_indices))
+    return feature_outlier_indices
+
+def drop_outliers(df, outliers):
+    indices = set([])
+    for col, col_indices in outliers:
+        indices = indices.union(set(col_indices))
+    return df.drop(list(indices))
 
