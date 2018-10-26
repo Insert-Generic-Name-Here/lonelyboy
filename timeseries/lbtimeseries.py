@@ -53,7 +53,9 @@ def find_zero_parts(x):
 
 
 def detrending(X):
-	'''Return the detrended part of X and the separate trend'''
+	'''Return the detrended part of X and the separate trend
+	THIS CODE IS SHIT. PLEASE GOD FIX IT. YOU ARE THE ONLY CAPABLE.
+	'''
 	
 	if len(X.shape)==1:
 		X=X.reshape((X.shape[0],1))
