@@ -48,7 +48,7 @@ def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init'
 				return gpd.GeoDataFrame(interpolated, crs = crs, geometry='geom')
 
 
-def calculate_velocity(gdf):
+def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 				'''
 				Return given dataframe with an extra velocity column that is calculated using the distance covered in a given amount of time
 				TODO - use the get distance method to save some space
@@ -60,6 +60,8 @@ def calculate_velocity(gdf):
 				gdf['next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 				# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots) 
 				gdf['velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
+				if smoothing:
+								gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean()
 				gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 				return gdf
 				
@@ -76,3 +78,24 @@ def calculate_distance_traveled(gdf):
 				gdf['distance'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).cumsum()
 				gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 				return gdf
+
+
+def pick_random_group(gdf, column):
+				return gdf.loc[gdf[column] == choice(gdf[column].unique())]					
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
