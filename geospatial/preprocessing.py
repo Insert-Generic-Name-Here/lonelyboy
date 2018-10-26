@@ -84,8 +84,41 @@ def pick_random_group(gdf, column):
 				return gdf.loc[gdf[column] == choice(gdf[column].unique())]					
 
 
+def detect_POIs(df, feature='velocity', alpha=20, window=100):
+				'''
+				Detect Points Of Interest based on the 1st order difference series of the selected feature.
 
+				Parameters
+				----------
+				df : the pandas dataframe to be used
 
+				feature: the column of the dataframe that will be used to mine the needed info, default = 'velocity' or velocity based trajectory segmentation
+
+				alpha : the multiplier that will be used to detect the outling values of the 1st order difference series of the selected feture
+
+				window : the span of the sliding window that will be used for smoothing
+
+				Returns
+				-------
+				
+				pois : list of the indicies where a change is detected (ex. a change in speed). These indicies can be used for trajectory segmentation.
+				'''
+				
+				#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
+				diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
+				#detect the outliers of the above series.
+				#Subtracting by the window is needed to counteract the padding that is created at the beggining by the sliding window 
+				outlier_groups = get_outliers(diff_series.dropna(), alpha=alpha)-window
+				#create the pois list and add the first point of the outlier_groups list that is a guaranteed POI
+				pois = [outlier_groups[0]]
+				#if a point is not a part of a concecutive list add it to the poi list
+				#that way only the first point of every group of outliers will be concidered a POI
+				for ind, point in enumerate(outlier_groups[1:],1):
+								if point != outlier_groups[ind-1]+1:
+												pois.append(point)
+				return pois
+				
+								
 
 
 

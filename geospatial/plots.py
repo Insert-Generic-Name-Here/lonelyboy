@@ -5,6 +5,7 @@ from random import choice
 import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 import numpy as np
+from lonelyboy.geospatial.preprocessing import get_outliers
 
 
 def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15)):
@@ -20,3 +21,7 @@ def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15)):
 								df2.to_crs(epsg=3857).plot(figsize=figsize,c=color[1], ax=ax)
 				ctx.add_basemap(ax)
 
+
+def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
+				plt.axvline(x=min(get_outliers(gdf[feature], alpha=alpha)), c=color)
+				plt.axvline(x=max(get_outliers(gdf[feature], alpha=alpha)), c=color)
