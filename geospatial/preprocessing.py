@@ -2,20 +2,19 @@ import pandas as pd
 from haversine import haversine
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from random import choice
 import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 import numpy as np
 
 
-def distance_to_nearest_port(point, ports):
+			def distance_to_nearest_port(point, ports):
 				'''
 				Calculates the minimum distance between the point and the lists of ports. Can be used to determine if the ship is sailing or not
 				'''
 				return ports.geom.distance(point).min()
 
 
-def get_outliers(series, alpha = 3):
+			def get_outliers(series, alpha = 3):
 				'''
 				Returns a series of indexes of row that are to be concidered outliers, using the quantilies of the data. 
 				'''
@@ -27,13 +26,12 @@ def get_outliers(series, alpha = 3):
 				return series.loc[(series >q_high) | (series<q_low)].index
 
 
-def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
+			def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
 				'''
 				Resample and interpolate linearly a sample vessel.
-
 				'''
 				#convert unix to datetime
-				sample_ves['datetime'] = pd.to_datetime(sample_ves['ts'],unit='s')
+				sample_ves['datetime'] = pd.to_datetime(sample_ves['ts'], unit='s')
 				#resample and interpolate using the method given. Linear is suggested
 				upsampled = sample_ves.resample(rule,on='datetime', loffset=True, kind='timestamp').first()
 				interpolated = upsampled.interpolate(method=method)
@@ -44,11 +42,11 @@ def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init'
 				interpolated.reset_index(drop=True, inplace=True)
 				#drop lat and lon if u like
 				if drop_lon_lat:
-								interpolated.drop(['lat', 'lon'], axis=1)
+					interpolated = interpolated.drop(['lat', 'lon'], axis=1)
 				return gpd.GeoDataFrame(interpolated, crs = crs, geometry='geom')
 
 
-def calculate_velocity(gdf, smoothing=False, window=15, center=False):
+			def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 				'''
 				Return given dataframe with an extra velocity column that is calculated using the distance covered in a given amount of time
 				TODO - use the get distance method to save some space
@@ -56,35 +54,35 @@ def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 				#create columns for current and next location. Drop the last columns that contains the nan value
 				gdf['current_loc'] = gdf.geom.apply(lambda x: (x.x,x.y))
 				gdf['next_loc'] = gdf.geom.shift(-1)
-				gdf = gdf[:-1]
+				gdf = gdf.loc[:-1,:]
 				gdf['next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 				# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots) 
 				gdf['velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
 				if smoothing:
-								gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean()
+					gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean()
 				gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 				return gdf
 				
 
 
-def calculate_distance_traveled(gdf):
+			def calculate_distance_traveled(gdf):
 				'''
 				Returns given dataframe with an added column ('distance') that contains the accumulated distance travel up to a specific point
 				'''
 				gdf['current_loc'] = gdf.geom.apply(lambda x: (x.x,x.y))
 				gdf['next_loc'] = gdf.geom.shift(-1)
-				gdf = gdf[:-1]
+				gdf = gdf.loc[:-1,:]
 				gdf['next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 				gdf['distance'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).cumsum()
 				gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 				return gdf
 
 
-def pick_random_group(gdf, column):
-				return gdf.loc[gdf[column] == choice(gdf[column].unique())]					
+			def pick_random_group(gdf, column, group_size=1):
+				return gdf.loc[gdf[column] == np.random.choice(gdf[column].unique(), group_size)]					
 
 
-def detect_POIs(df, feature='velocity', alpha=20, window=100):
+			def detect_POIs(df, feature='velocity', alpha=20, window=100):
 				'''
 				Detect Points Of Interest based on the 1st order difference series of the selected feature.
 
@@ -109,15 +107,19 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 				#detect the outliers of the above series.
 				#Subtracting by the window is needed to counteract the padding that is created at the beggining by the sliding window 
 				outlier_groups = get_outliers(diff_series.dropna(), alpha=alpha)-window
-				#create the pois list and add the first point of the outlier_groups list that is a guaranteed POI
-				pois = [outlier_groups[0]]
-				#if a point is not a part of a concecutive list add it to the poi list
-				#that way only the first point of every group of outliers will be concidered a POI
-				for ind, point in enumerate(outlier_groups[1:],1):
-								if point != outlier_groups[ind-1]+1:
-												pois.append(point)
-				return pois
 				
+				try:
+					#create the pois list and add the first point of the outlier_groups list that is a guaranteed POI
+					pois = [outlier_groups[0]]
+					#if a point is not a part of a concecutive list add it to the poi list
+					#that way only the first point of every group of outliers will be concidered a POI
+					for ind, point in enumerate(outlier_groups[1:],1):
+						if point != outlier_groups[ind-1]+1:
+							pois.append(point)
+					return pois
+				except IndexError: # No Outliers?! Maybe you Need to Tune the Function's Parameters
+					return None
+	
 								
 
 
