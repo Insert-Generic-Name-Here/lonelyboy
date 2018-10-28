@@ -79,7 +79,7 @@ def calculate_distance_traveled(gdf):
 
 
 def pick_random_group(gdf, column, group_size=1):
-	return gdf.loc[gdf[column] == np.random.choice(gdf[column].unique(), group_size)]					
+	return gdf.loc[gdf[column].isin(np.random.choice(gdf[column].unique(), group_size))]					
 
 
 def detect_POIs(df, feature='velocity', alpha=20, window=100):
