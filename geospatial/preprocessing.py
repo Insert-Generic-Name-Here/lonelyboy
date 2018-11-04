@@ -4,6 +4,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import contextily as ctx
 from shapely.geometry import Point, LineString, shape
+from tqdm import tqdm 
 import numpy as np
 
 
@@ -121,7 +122,23 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 		return None
 
 					
+def PotentialAreaOfActivity(gpd, velocity_threshold, smoothing=True, window=10, center=True):
+	'''
+	Detect Invalid GPS points by calculating the Potential Area of Activity (PAA) and removing them based on a velocity threshold.
+	'''
+	gpd['velocity'] = np.nan
 
+	for mmsi in tqdm(gpd.mmsi.unique()):
+		try:
+			gpd.loc[gpd.mmsi == mmsi] = calculate_velocity(gpd.loc[gpd.mmsi == mmsi], smoothing=smoothing, window=window, center=center)
+			mmsi_vel_outliers = gpd.iloc[(gpd.mmsi == mmsi) & (gpd.velocity > velocity_threshold)]
+			gpd = gpd.drop(mmsi_vel_outliers)
+		except:
+			continue
+
+	gpd = gpd.reset_index(drop=True)
+	gpd = gpd.fillna(0)
+	return gpd
 
 
 
