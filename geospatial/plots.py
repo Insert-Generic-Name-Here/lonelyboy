@@ -25,3 +25,15 @@ def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15)):
 def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
 				plt.axvline(x=min(get_outliers(gdf[feature], alpha=alpha)), c=color)
 				plt.axvline(x=max(get_outliers(gdf[feature], alpha=alpha)), c=color)
+
+
+def plot_clusters(gdf, clusters):
+	label_color = pd.DataFrame([], index=gdf.index, columns=['color'])
+
+	cluster_indices = [gdf.loc[gdf.mmsi.isin(cluster)].index for cluster in clusters] 
+	for color_idx, cluster in enumerate(cluster_indices):
+		label_color.loc[label_color.index.isin(cluster), 'color'] = color_idx
+
+	ax = gdf.to_crs(epsg=3857).plot(figsize=(10, 10), c=label_color.color.values)
+	ctx.add_basemap(ax, zoom=11)
+	plt.show()
