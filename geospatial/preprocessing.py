@@ -23,7 +23,7 @@ def get_outliers(series, alpha = 3):
 	q_high = q75 + alpha*iqr
 	q_low = q25 - alpha*iqr
 	# return the indexes of rows that are over/under the threshold above
-	return series.loc[(series >q_high) | (series<q_low)].index
+	return series.loc[(series >q_high) | (series<q_low)].index , (q_low, q_high)
 
 
 def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
@@ -59,7 +59,7 @@ def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 	# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots) 
 	gdf['velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
 	if smoothing:
-		gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean()
+		gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean().bfill().ffill()
 	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 	return gdf
 	
@@ -105,17 +105,17 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 	#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
 	diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 	#detect the outliers of the above series.
-	#Subtracting by the window is needed to counteract the padding that is created at the beggining by the sliding window 
-	outlier_groups = get_outliers(diff_series.dropna(), alpha=alpha)-window
+	outlier_groups = get_outliers(diff_series.dropna(), alpha=alpha)
 	
 	try:
 		#create the pois list and add the first point of the outlier_groups list that is a guaranteed POI
-		pois = [outlier_groups[0]]
+		pois = [0,outlier_groups[0]]
 		#if a point is not a part of a concecutive list add it to the poi list
 		#that way only the first point of every group of outliers will be concidered a POI
 		for ind, point in enumerate(outlier_groups[1:],1):
 			if point != outlier_groups[ind-1]+1:
 				pois.append(point)
+		pois.append(len(df)-1)
 		return pois
 	except IndexError: # No Outliers?! Maybe you Need to Tune the Function's Parameters
 		return None
