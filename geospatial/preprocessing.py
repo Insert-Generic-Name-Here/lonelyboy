@@ -106,7 +106,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 	#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
 	diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 	#detect the outliers of the above series.
-	outlier_groups = get_outliers(diff_series.dropna(), alpha=alpha)
+	outlier_groups, (qlow, qhigh) = get_outliers(diff_series.dropna(), alpha=alpha)
 	
 	try:
 		#create the pois list and add the first point of the outlier_groups list that is a guaranteed POI
@@ -117,7 +117,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 			if point != outlier_groups[ind-1]+1:
 				pois.append(point)
 		pois.append(len(df)-1)
-		return pois
+		return pois, (qlow, qhigh)
 	except IndexError: # No Outliers?! Maybe you Need to Tune the Function's Parameters
 		return None
 
