@@ -2,6 +2,7 @@ import pandas as pd
 from haversine import haversine
 import geopandas as gpd
 import matplotlib.pyplot as plt
+from multiprocessing import Pool
 import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 from tqdm import tqdm 
@@ -27,14 +28,14 @@ def get_outliers(series, alpha = 3):
 	return series.loc[(series >q_high) | (series<q_low)].index , (q_low, q_high)
 
 
-def resample_geospatial(sample_ves, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
+def resample_geospatial(vessel, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
 	'''
 	Resample and interpolate linearly a sample vessel.
 	'''
 	#convert unix to datetime
-	sample_ves['datetime'] = pd.to_datetime(sample_ves['ts'], unit='s')
+	vessel['datetime'] = pd.to_datetime(vessel['ts'], unit='s')
 	#resample and interpolate using the method given. Linear is suggested
-	upsampled = sample_ves.resample(rule,on='datetime', loffset=True, kind='timestamp').first()
+	upsampled = vessel.resample(rule,on='datetime', loffset=True, kind='timestamp').first()
 	interpolated = upsampled.interpolate(method=method)
 	#interpolate the geom column with the correct point objects using lat and lon
 	interpolated['geom'] = interpolated[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
@@ -117,10 +118,9 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 			if point != outlier_groups[ind-1]+1:
 				pois.append(point)
 		pois.append(len(df)-1)
-		return pois, (qlow, qhigh)
-	except IndexError: # No Outliers?! Maybe you Need to Tune the Function's Parameters
-		return None
-
+	except : # No Outliers?! Maybe you Need to Tune the Function's Parameters
+		pois=[0, len(df)-1]
+	return pois, (qlow, qhigh)
 					
 def PotentialAreaOfActivity(gpd, velocity_threshold, smoothing=True, window=10, center=True):
 	'''
@@ -140,14 +140,57 @@ def PotentialAreaOfActivity(gpd, velocity_threshold, smoothing=True, window=10, 
 	gpd = gpd.fillna(0)
 	return gpd
 
+def get_trajetory_segment(x, pois):
+	for poi in pois:
+		if x.name >= poi:
+			continue
+		return int(pois.index(poi)-1)
 
 
+def segment_trajectories(gdf, velocity_window=3, velocity_drop_alpha=3, pois_alpha=80, pois_window=100):
+	gdf['traj_id'] = np.nan
+	for key_value, vessel in gdf.groupby(['mmsi']):
+		if len(vessel) < 2 : continue
+		vessel = resample_geospatial(calculate_velocity(vessel, smoothing=True, window=velocity_window))
+		vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0) 
+		pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
+		vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
+	return gdf
 
 
+def clean_gdf(gdf, velocity_outlier_alpha=3):
+	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
+	for key_value, vessel in gdf.groupby(['mmsi']):
+		vessel.drop(get_outliers(vessel.ts, alpha=velocity_outlier_alpha)[0], axis=0, inplace=True)
+		vessel.sort_values(['ts'], inplace=True)
+		vessel.reset_index(inplace=True)
+	gdf.reset_index(inplace=True)
+	gdf.drop(['index', 'id', 'status'], axis=1, inplace=True)
+	return gdf
 
 
+def partition_geospatial(gdf, feature='mmsi', num_partitions=1):
+	partitions = []
+		    
+	tmp_X = gpd.GeoDataFrame([], columns=gdf.columns)
+	for _, x in gdf.groupby([feature]):
+		tmp_X = tmp_X.append(x)
+		if len(tmp_X) >= len(gdf)//num_partitions:
+			partitions.append(tmp_X)
+			tmp_X = tmp_X.iloc[0:0] # Drop all Rows
+	partitions.append(tmp_X)
+	return partitions
 
 
-
-
-
+def parallelize_dataframe(df, func, np_split=True, feature='mmsi', num_partitions=1):
+	print('starting..')
+	if np_split:
+		partitions = np.array_split(df, cpu_count())
+	else:
+		partitions = [grp[1] for grp in df.groupby(['mmsi'])]
+	print (len(partitions))
+	pool = Pool(num_partitions)
+	df = pd.concat(pool.map(func, partitions))
+	pool.close()
+	pool.join()
+	return df
