@@ -147,31 +147,36 @@ def get_trajetory_segment(x, pois):
 		return int(pois.index(poi)-1)
 
 
+def segment_vessel(vessel, velocity_window, velocity_drop_alpha, pois_alpha, pois_window):
+	#gdf['traj_id'] = np.nan
+	if len(vessel) == 1 :
+		vessel.velocity = vessel.speed
+		vessel.traj_id  = 0.0
+		return vessel
+	vessel = calculate_velocity(vessel, smoothing=True, window=velocity_window)
+	vessel = resample_geospatial(vessel)
+	vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0) 
+	pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
+	vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
+	return vessel
+	
+
 def segment_trajectories(gdf, velocity_window=3, velocity_drop_alpha=3, pois_alpha=80, pois_window=100):
-	gdf['traj_id'] = np.nan
-	for key_value, vessel in gdf.groupby(['mmsi']):
-		if len(vessel) < 2 : continue
-		vessel = resample_geospatial(calculate_velocity(vessel, smoothing=True, window=velocity_window))
-		vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0) 
-		pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
-		vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
+	gdf = gdf.groupby(['mmsi']).apply(segment_vessel,velocity_window, velocity_drop_alpha, pois_alpha, pois_window)
 	return gdf
 
 
 def clean_gdf(gdf, velocity_outlier_alpha=3):
 	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
-	for key_value, vessel in gdf.groupby(['mmsi']):
-		vessel.drop(get_outliers(vessel.ts, alpha=velocity_outlier_alpha)[0], axis=0, inplace=True)
-		vessel.sort_values(['ts'], inplace=True)
-		vessel.reset_index(inplace=True)
+	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'])['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
 	gdf.reset_index(inplace=True)
 	gdf.drop(['index', 'id', 'status'], axis=1, inplace=True)
+	gdf['velocity'], gdf['traj_id'] = np.nan, np.nan
 	return gdf
 
 
 def partition_geospatial(gdf, feature='mmsi', num_partitions=1):
 	partitions = []
-		    
 	tmp_X = gpd.GeoDataFrame([], columns=gdf.columns)
 	for _, x in gdf.groupby([feature]):
 		tmp_X = tmp_X.append(x)
