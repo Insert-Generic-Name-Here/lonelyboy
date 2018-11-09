@@ -16,6 +16,12 @@ def distance_to_nearest_port(point, ports):
 	return ports.geom.distance(point).min()
 
 
+def ts_from_str_datetime(df):
+	print (f'Droping {df.datetime.isna().sum()} rows..')
+	df.dropna(subset=['datetime'], inplace=True)
+	df['ts'] = pd.to_datetime(df.datetime).values.astype(np.int64) // 10 ** 9
+
+
 def get_outliers(series, alpha = 3):
 	'''
 	Returns a series of indexes of row that are to be concidered outliers, using the quantilies of the data. 
@@ -142,7 +148,8 @@ def PotentialAreaOfActivity(gpd, velocity_threshold, smoothing=True, window=10, 
 
 def get_trajetory_segment(x, pois):
 	for poi in pois:
-		if x.name >= poi:
+		if x.name > poi:
+			if poi == pois[-1]: print('prob')
 			continue
 		return int(pois.index(poi)-1)
 
@@ -156,21 +163,23 @@ def segment_vessel(vessel, velocity_window, velocity_drop_alpha, pois_alpha, poi
 	vessel = calculate_velocity(vessel, smoothing=True, window=velocity_window)
 	vessel = resample_geospatial(vessel)
 	vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0) 
+	vessel.reset_index(inplace=True, drop=True)
 	pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
 	vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
 	return vessel
 	
 
 def segment_trajectories(gdf, velocity_window=3, velocity_drop_alpha=3, pois_alpha=80, pois_window=100):
-	gdf = gdf.groupby(['mmsi']).apply(segment_vessel,velocity_window, velocity_drop_alpha, pois_alpha, pois_window)
+	gdf = gdf.groupby(['mmsi'], as_index=False).apply(segment_vessel,velocity_window, velocity_drop_alpha, pois_alpha, pois_window).reset_index(drop=True)
+	ts_from_str_datetime(gdf)
 	return gdf
 
 
 def clean_gdf(gdf, velocity_outlier_alpha=3):
 	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
-	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'])['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
-	gdf.reset_index(inplace=True)
-	gdf.drop(['index', 'id', 'status'], axis=1, inplace=True)
+	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'], as_index=False)['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
+	gdf.reset_index(inplace=True, drop=True)
+	gdf.drop(['id', 'status'], axis=1, inplace=True)
 	gdf['velocity'], gdf['traj_id'] = np.nan, np.nan
 	return gdf
 
