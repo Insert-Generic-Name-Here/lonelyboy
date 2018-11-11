@@ -2,7 +2,7 @@ import pandas as pd
 from haversine import haversine
 import geopandas as gpd
 import matplotlib.pyplot as plt
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 from tqdm import tqdm 
@@ -59,18 +59,36 @@ def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 	Return given dataframe with an extra velocity column that is calculated using the distance covered in a given amount of time
 	TODO - use the get distance method to save some space
 	'''
-	#create columns for current and next location. Drop the last columns that contains the nan value
+	# if there is only one point in the trajectory its velocity will be the one measured from the speedometer
+	if len(gdf) == 1:
+		gdf.velocity = gdf.speed
+		return gdf
+
+	# create columns for current and next location. Drop the last columns that contains the nan value
 	gdf['current_loc'] = gdf.geom.apply(lambda x: (x.x,x.y))
 	gdf['next_loc'] = gdf.geom.shift(-1)
 	gdf = gdf[:-1]
 	gdf['next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 	# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots) 
 	gdf['velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
+	
 	if smoothing:
 		gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean().bfill().ffill()
-	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
-	return gdf
 	
+	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
+	gdf = gdf.loc[gdf['mmsi'] != 0]
+	gdf.dropna(subset=['mmsi', 'geom'], inplace=True)
+
+	return gdf.fillna(0)
+
+
+def PotentialAreaOfActivity(gdf, velocity_threshold):
+	'''
+	Detect Invalid GPS points by calculating the Potential Area of Activity (PAA) and removing them based on a velocity threshold.
+	'''
+	indices = [item for sublist in [x for x in gdf.groupby(['mmsi'])['velocity'].apply(lambda x: x.loc[x.values >= velocity_threshold].index)] for item in sublist]
+	gdf = gdf.drop(indices)
+	return gdf
 
 
 def calculate_distance_traveled(gdf):
@@ -128,23 +146,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 		pois=[0, len(df)-1]
 	return pois, (qlow, qhigh)
 					
-def PotentialAreaOfActivity(gpd, velocity_threshold, smoothing=True, window=10, center=True):
-	'''
-	Detect Invalid GPS points by calculating the Potential Area of Activity (PAA) and removing them based on a velocity threshold.
-	'''
-	gpd['velocity'] = np.nan
 
-	for mmsi in tqdm(gpd.mmsi.unique()):
-		try:
-			gpd.loc[gpd.mmsi == mmsi] = calculate_velocity(gpd.loc[gpd.mmsi == mmsi], smoothing=smoothing, window=window, center=center)
-			mmsi_vel_outliers = gpd.iloc[(gpd.mmsi == mmsi) & (gpd.velocity > velocity_threshold)]
-			gpd = gpd.drop(mmsi_vel_outliers)
-		except:
-			continue
-
-	gpd = gpd.reset_index(drop=True)
-	gpd = gpd.fillna(0)
-	return gpd
 
 def get_trajetory_segment(x, pois):
 	for poi in pois:
@@ -192,6 +194,7 @@ def partition_geospatial(gdf, feature='mmsi', num_partitions=1):
 		if len(tmp_X) >= len(gdf)//num_partitions:
 			partitions.append(tmp_X)
 			tmp_X = tmp_X.iloc[0:0] # Drop all Rows
+	# partitions.append(tmp_X.reset_index(drop=True))
 	partitions.append(tmp_X)
 	return partitions
 
