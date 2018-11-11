@@ -2,21 +2,39 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from sklearn import metrics
+from functools import partial
+from sklearn.base import clone
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
+from scipy.spatial.distance import cdist
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import MinMaxScaler
-from scipy.spatial.distance import cdist
 from lonelyboy.geospatial.metrics import haversine_distance as haversine
 
 
-def KMeans_Silhouette(X, n_sims, init='k-means++', n_init=10, n_jobs=-1, precompute_distances=True, random_state=0, verbose=0):
+def MinMax_Scaler(X, feature_range=(0, 1), copy=True):
+    scaler = MinMaxScaler(feature_range, copy)
+    return scaler.fit_transform(X)
+
+
+# CMC = Coherent Moving Cluster -- Convoy Verification Process
+def cmc_convoy_verification(cluster_left, cluster_right, min_samples):
+    return len(cluster_left.intersection(cluster_right)) >= min_samples
+
+
+# CMC = Coherent Moving Cluster -- Flock Verification Process
+def cmc_flock_verification(cluster_left, cluster_right, min_samples):
+    # return len(cluster_left.intersection(cluster_right)) >= min_samples
+    return (cluster_left == cluster_right)
+
+
+def KMeans_Clustering(X, init='k-means++', n_init=10, n_jobs=-1, precompute_distances=True, random_state=0, verbose=0):
     ''' Determine the Optimal Number of Clusters using the Silhouette Score on Multiple Runs of KMeans '''
     clusters = []   
     silhouettes = []
     
-    for k in tqdm(range(1,n_sims+1), leave=False):
-        kmeanTest = KMeans(n_clusters=k, init=init, n_init=n_init, n_jobs=n_jobs, precompute_distances=precompute_distances, random_state=random_state, verbose=verbose).fit(X);
+    for k in range(1, len(X)+1):
+        kmeanTest = KMeans(n_clusters=k, init=init, n_init=n_init, n_jobs=n_jobs, precompute_distances=precompute_distances, random_state=random_state, verbose=verbose).fit(X)
         label = kmeanTest.labels_
         clusters.append(label)
         try:
@@ -26,65 +44,56 @@ def KMeans_Silhouette(X, n_sims, init='k-means++', n_init=10, n_jobs=-1, precomp
             silhouettes.append(0)
             
     n_clusters_opt = np.argmax(np.array(silhouettes))
-    return n_clusters_opt+1, clusters[n_clusters_opt]
+    return clusters[n_clusters_opt]
 
 
-# TODO #1: Add a Time Threshold for tracking the end_time of the Flock.
-# TODO #2: Check if the Application of Haversine Formula Enhances the Cluster Quality (Hint: Check the Data Projection).
-def flock_mining(gdf, doi=None, init='k-means++', n_init=10, n_jobs=-1, precompute_distances=True, random_state=0, verbose=0):
-    # Get the Useful Features
-    gdf[['lon', 'lat']] = gdf['geom'].apply(lambda x: pd.Series({'lon':x.x, 'lat':x.y})) 
-    gdf = gdf.drop('geom', axis=1) 
+def DBSCAN_Clustering(X, eps=0.5, min_samples=5, metric='euclidean', metric_params=None, algorithm='auto', leaf_size=30, p=None, n_jobs=None):
+    clustering = DBSCAN(eps=eps, min_samples=min_samples, metric=metric, metric_params=metric_params, algorithm=algorithm, leaf_size=leaf_size, p=p, n_jobs=n_jobs).fit(X) 
+    return clustering.labels_
+
+
+def join_geospatial(df_left, df_right, condition, mode):
+    if (len(df_left) == 0):
+        return df_right
     
-    if doi is None:
-        datetimes = gdf['datetime'].unique()
-    else:
-        datetimes = doi
+    df_result = pd.DataFrame([], columns=[mode, 'start_time', 'end_time'])
+    indices = []
     
-    flocks = pd.DataFrame([], columns=['flocks', 'start_time', 'end_time'])
-
-    for datetime_of_interest in tqdm(datetimes):
-        # timeFrame = gdf[['lon','lat', 'course']].loc[gdf['datetime'] == datetime_of_interest]
-        timeFrame = gdf[['lon','lat']].loc[gdf['datetime'] == datetime_of_interest]
-        # Normalize
-        scaler = MinMaxScaler()
-        X = scaler.fit_transform(timeFrame.values)
-        # Cluster
-        if (len(timeFrame) == 1):
-            continue
-        n_flocks, labels = KMeans_Silhouette(X, len(timeFrame), init, n_init, n_jobs, precompute_distances, random_state, verbose)
-        # Create the DataFrame (Structure: <INDEX_OF_CLUSTER>, <LIST_OF_TIMEFRAME_INDICES>)
-        tmp = pd.DataFrame(np.array([gdf.loc[timeFrame.index]['mmsi'], labels]).T, columns=['flocks', 'flock_idx'])
-        tmp = tmp.loc[tmp.flock_idx != -1].groupby('flock_idx')['flocks'].apply(list)
-        # Append to Flock History
-        flocks = flocks.append(pd.DataFrame(tmp, columns=['flocks', 'start_time', 'end_time']))
-        flocks.start_time = datetime_of_interest
-
-    return flocks
-
-
-# TODO #1: Add a Time Threshold for tracking the end_time of the Convoy.
-def convoy_mining(gdf, time_threshold=5, min_samples=3, eps=2.5, metric=haversine, metric_params=None, algorithm='auto', leaf_size=50, p=None, n_jobs=-1): 
-    gdf[['lon', 'lat']] = gdf['geom'].apply(lambda x: pd.Series({'lon':x.x, 'lat':x.y})) 
-    gdf = gdf.drop('geom', axis=1)
-
-    convoys = pd.DataFrame([], columns=['convoys', 'start_time', 'end_time'])
-
-    for datetime_of_interest in tqdm(gdf['datetime'].unique()):      
-        # Get the Useful Features
-        timeFrame = gdf[['lon', 'lat']].loc[gdf['datetime'] == datetime_of_interest]
-        # Normalize
-        scaler = MinMaxScaler()
-        X = scaler.fit_transform(timeFrame.values)
-        # Cluster
-        clustering = DBSCAN(eps=eps, min_samples=min_samples, metric=metric, metric_params=metric_params,\
-                            algorithm=algorithm, leaf_size=leaf_size, p=p, n_jobs=n_jobs).fit(X)
-        cluster_n = clustering.labels_
-        # Create the DataFrame (Structure: <INDEX_OF_CLUSTER>, <LIST_OF_TIMEFRAME_INDICES>)
-        tmp = pd.DataFrame(np.array([gdf.loc[timeFrame.index]['mmsi'], cluster_n]).T, columns=['convoys', 'cnv_idx'])
-        tmp = tmp.loc[tmp.cnv_idx != -1].groupby('cnv_idx')['convoys'].apply(list)
-        # Append to Convoy History
-        convoys = convoys.append(pd.DataFrame(tmp, columns=['convoys', 'start_time', 'end_time']))
-        convoys.start_time = datetime_of_interest
+    for idx_left, cluster_left in enumerate(df_left[mode]):
+        for idx_right, cluster_right in enumerate(df_right[mode]):
+            if condition(cluster_left, cluster_right):                
+                res = pd.DataFrame([{mode:cluster_left.intersection(cluster_right), 'start_time':df_left.iloc[idx_left].start_time, 'end_time':df_right.iloc[idx_right].start_time}], columns=[mode, 'start_time', 'end_time'])  
+                df_result = df_result.append(res, ignore_index=True)
+                indices.append(idx_right)
+                break
         
-    return convoys
+    indices = np.delete(df_right.index.values, indices)
+    df_result = df_result.append(df_right.iloc[indices], ignore_index=True)
+    return df_result
+
+
+def group_patterns_mining(gdf, normalizing_algorithm, clustering_algorithm, verification_process, mode, time_threshold=5, min_samples=2, resampling_rate=60): 
+    '''
+    Search for Flocks/Convoys, given a GeoDataFrame.
+    '''
+    
+    gdf[['lon', 'lat']] = gdf['geom'].apply(lambda x: pd.Series({'lon':x.x, 'lat':x.y})) 
+    gdf.drop('geom', axis=1)
+    
+    cmc_verification_partial = partial(verification_process, min_samples=min_samples)
+    gp_history = pd.DataFrame([], columns=[mode, 'start_time', 'end_time'])
+    
+    for doi, timeFrame in gdf.groupby(['datetime'], as_index=False):   
+        print (f'Datetime of Interest: {doi}\r', end='')    
+        X = normalizing_algorithm(timeFrame[['lon', 'lat']].values)
+        cluster_n = clustering_algorithm(X)
+        # Create the DataFrame (Structure: <INDEX_OF_CLUSTER>, <LIST_OF_TIMEFRAME_INDICES>)
+        tmp = pd.DataFrame(np.array([gdf.loc[timeFrame.index]['mmsi'], cluster_n]).T, columns=[mode, 'cluster_idx'])
+        tmp = tmp.loc[tmp.cluster_idx != -1].groupby('cluster_idx')[mode].apply(list).apply(set)
+        tmp = pd.DataFrame({mode:tmp, 'start_time':np.array([doi]*len(tmp))}, columns=[mode, 'start_time', 'end_time'])
+        # Append to Convoy History
+        gp_history = join_geospatial(gp_history, tmp, cmc_verification_partial, mode=mode)
+        
+    gp_history = gp_history.fillna(pd.Timestamp(gdf.datetime.unique()[-1]))
+    gp_history.end_time = pd.to_datetime(gp_history.end_time, unit='ns')
+    return gp_history.loc[(gp_history.end_time - gp_history.start_time >= np.timedelta64(time_threshold*resampling_rate, 's')) & (gp_history[mode].apply(len) >= min_samples)].reset_index(drop=True)
