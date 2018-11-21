@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import networkx as nx
+from scipy.spatial import distance_matrix
 
 
 def index_of_cluster(item, cluster_list):
@@ -37,3 +38,4 @@ def get_flock_labels(timeframe,radius):
 def flocks(df,radius):
 	df['flock_label'] = np.nan
 	df =  df.groupby('ts', as_index=False).apply(get_flock_labels, radius)
+	return df
