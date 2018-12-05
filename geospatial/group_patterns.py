@@ -144,10 +144,10 @@ def hasNext(x):
         return []
 
 
-def group_patterns_mining(cluster_history, time_threshold=5, min_samples=3):
+def group_patterns_mining(cluster_history, mode, time_threshold=5, min_samples=3):
     endOfTime = cluster_history.datetime.max()
-    flocks = pd.DataFrame([], columns=['flocks', 'start', 'end'])
-    cluster_history_window = cluster_history.groupby('mmsi').agg({'flock_label': lambda x: window(list(x), time_threshold), 'datetime': lambda x: pd.Timestamp(min(x))})
+    mined_patterns = pd.DataFrame([], columns=[mode, 'start', 'end'])
+    cluster_history_window = cluster_history.groupby('mmsi').agg({'cluster_label': lambda x: window(list(x), time_threshold), 'datetime': lambda x: pd.Timestamp(min(x))})
 
     while (len(cluster_history_window) != 0):
         # Set the Start of Time
@@ -156,20 +156,20 @@ def group_patterns_mining(cluster_history, time_threshold=5, min_samples=3):
         print (f'Datetime of Interest: {startTime}', end='\r')
 
         # Get the History Window according to the above Timestamps
-        timeFrameClusters = cluster_history_window.loc[cluster_history_window.datetime == startTime]['flock_label'].apply(lambda x: hasNext(x)).apply(tuple)
+        timeFrameClusters = cluster_history_window.loc[cluster_history_window.datetime == startTime]['cluster_label'].apply(lambda x: hasNext(x)).apply(tuple)
         # Group by the History Window
         for label_hist_window, mmsis in timeFrameClusters.groupby(timeFrameClusters):
             if ((len(mmsis.index) >= min_samples) and (-1 not in label_hist_window)):
-                foi = flocks.loc[flocks.flocks.apply(tuple) == tuple(mmsis.index)]
+                foi = mined_patterns.loc[mined_patterns[mode].apply(tuple) == tuple(mmsis.index)]
     #             if (-1 in label_hist_window):
     #                 continue
-                    # TODO - Refine Here the End Timestamp for Existing Flocks (Minor)
+                    # TODO - Refine Here the End Timestamp for Existing Patterns (Minor)
     #             else:
                 if (len(foi) != 0):
-                    flocks.at[foi.index[0], 'end'] = endTime
+                    mined_patterns.at[foi.index[0], 'end'] = endTime
                 else:
-                    newFlockRow = pd.DataFrame([{'flocks': tuple(mmsis.index),  'start': startTime, 'end': endTime}], columns=['flocks', 'start', 'end'])                     
-                    flocks = flocks.append(newFlockRow, ignore_index=True)
+                    newPattern = pd.DataFrame([{mode: tuple(mmsis.index),  'start': startTime, 'end': endTime}], columns=[mode, 'start', 'end'])                     
+                    mined_patterns = mined_patterns.append(newPattern, ignore_index=True)
 
         # Prepare for Next Iteration
         #     * Clean the Redundant Records
@@ -181,4 +181,4 @@ def group_patterns_mining(cluster_history, time_threshold=5, min_samples=3):
         if (startTime > pd.Timestamp(endOfTime)):
             break
         
-    return flocks
+    return mined_patterns
