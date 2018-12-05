@@ -1,15 +1,21 @@
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from tqdm import tqdm
+import networkx as nx
 from sklearn import metrics
 from functools import partial
 from sklearn.base import clone
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 from scipy.spatial.distance import cdist
+from scipy.spatial import distance_matrix
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import MinMaxScaler
+from shapely.geometry import Point, LineString, shape
 from lonelyboy.geospatial.metrics import haversine_distance as haversine
+
+
 
 
 def MinMax_Scaler(X, feature_range=(0, 1), copy=True):
@@ -17,13 +23,13 @@ def MinMax_Scaler(X, feature_range=(0, 1), copy=True):
     return scaler.fit_transform(X)
 
 
-# CMC = Coherent Moving Cluster -- Convoy Verification Process
 def cmc_convoy_verification(cluster_left, cluster_right, min_samples):
+    ''' CMC = Coherent Moving Cluster -- Convoy Verification Process '''
     return len(cluster_left.intersection(cluster_right)) >= min_samples
 
 
-# CMC = Coherent Moving Cluster -- Flock Verification Process
 def cmc_flock_verification(cluster_left, cluster_right, min_samples):
+    ''' CMC = Coherent Moving Cluster -- Flock Verification Process '''
     # return len(cluster_left.intersection(cluster_right)) >= min_samples
     return (cluster_left == cluster_right)
 
@@ -52,48 +58,127 @@ def DBSCAN_Clustering(X, eps=0.5, min_samples=5, metric='euclidean', metric_para
     return clustering.labels_
 
 
-def join_geospatial(df_left, df_right, condition, mode):
-    if (len(df_left) == 0):
-        return df_right
-    
-    df_result = pd.DataFrame([], columns=[mode, 'start_time', 'end_time'])
-    indices = []
-    
-    for idx_left, cluster_left in enumerate(df_left[mode]):
-        for idx_right, cluster_right in enumerate(df_right[mode]):
-            if condition(cluster_left, cluster_right):                
-                res = pd.DataFrame([{mode:cluster_left.intersection(cluster_right), 'start_time':df_left.iloc[idx_left].start_time, 'end_time':df_right.iloc[idx_right].start_time}], columns=[mode, 'start_time', 'end_time'])  
-                df_result = df_result.append(res, ignore_index=True)
-                indices.append(idx_right)
-                break
-        
-    indices = np.delete(df_right.index.values, indices)
-    df_result = df_result.append(df_right.iloc[indices], ignore_index=True)
-    return df_result
+def index_of_cluster(item, cluster_list):
+    position = [ind for ind, subl in enumerate(cluster_list) if item in subl]
+    if len(position)>1:
+        raise ValueError
+    if not position:
+        return [-1]
+    else:
+        return position
 
 
-def group_patterns_mining(gdf, normalizing_algorithm, clustering_algorithm, verification_process, mode, time_threshold=5, min_samples=2, resampling_rate=60): 
-    '''
-    Search for Flocks/Convoys, given a GeoDataFrame.
-    '''
-    
-    gdf[['lon', 'lat']] = gdf['geom'].apply(lambda x: pd.Series({'lon':x.x, 'lat':x.y})) 
-    gdf.drop('geom', axis=1)
-    
-    cmc_verification_partial = partial(verification_process, min_samples=min_samples)
-    gp_history = pd.DataFrame([], columns=[mode, 'start_time', 'end_time'])
-    
-    for doi, timeFrame in gdf.groupby(['datetime'], as_index=False):   
-        print (f'Datetime of Interest: {doi}\r', end='')    
-        X = normalizing_algorithm(timeFrame[['lon', 'lat']].values)
-        cluster_n = clustering_algorithm(X)
-        # Create the DataFrame (Structure: <INDEX_OF_CLUSTER>, <LIST_OF_TIMEFRAME_INDICES>)
-        tmp = pd.DataFrame(np.array([gdf.loc[timeFrame.index]['mmsi'], cluster_n]).T, columns=[mode, 'cluster_idx'])
-        tmp = tmp.loc[tmp.cluster_idx != -1].groupby('cluster_idx')[mode].apply(list).apply(set)
-        tmp = pd.DataFrame({mode:tmp, 'start_time':np.array([doi]*len(tmp))}, columns=[mode, 'start_time', 'end_time'])
-        # Append to Convoy History
-        gp_history = join_geospatial(gp_history, tmp, cmc_verification_partial, mode=mode)
+def connected_edges(data):
+    G = nx.Graph()
+    G.add_edges_from(data)
+    return [list(cluster) for cluster in nx.connected_components(G)]
+
+
+def pairs_in_radius(df, radius):
+    distances = np.triu(distance_matrix(df[['lat', 'lon']].values, df[['lat', 'lon']].values), 0)
+#     distances = sample_timeFrame[['lon', 'lat']].T.apply(lambda A: sample_timeFrame[['lon', 'lat']].T.apply(lambda B: haversine((A[0], A[1]), (B[0], B[1]))))
+    distances = np.triu(distances, 0)
+    distances[distances == 0] = np.inf
+    return np.vstack(np.where(distances<=radius)).T
+
+
+def get_flock_labels(timeframe,radius):
+    timeframe.reset_index(drop=True , inplace=True)
+    data = pairs_in_radius(timeframe, radius)
+    clusters = connected_edges(data)
+    timeframe['flock_label'] = timeframe.apply( lambda x: index_of_cluster(x.name, clusters)[0], axis=1)
+    return timeframe
+
+
+def flocks(df,radius):
+    df['flock_label'] = np.nan
+    df =  df.groupby('datetime', as_index=False).apply(get_flock_labels, radius)
+    return df
+
+
+def point_from_lat_lon(df_w_lat_lon):
+    df_w_lat_lon['geom'] = np.nan
+    df_w_lat_lon['geom'] = df_w_lat_lon[['lon', 'lat']].apply(lambda x: Point(x), axis=1)
+    return gpd.GeoDataFrame(df_w_lat_lon, geometry='geom')
+
+
+def get_correct_label(present, future):
+    lst = future.loc[future.mmsi.isin(present.mmsi)].flock_label.value_counts().index
+    if lst[0] != -1 or len(lst)==1:
+        return lst[0]
+    else:
+        return lst[1]
+
+
+def swap(x, pair):
+    return pair[pair.index(x)-1] if x in pair else x
+
+
+def window(iterable, size=2):
+    i = iter(iterable)
+    win = []
+    for e in range(0, size):
+        win.append(next(i))
+    yield win
+
+    for e in i:
+        win = win[1:] + [e]
+        yield win
+
+
+def label_tracing(df):
+    grouped = df.groupby('datetime')
+    for  ind, (ts, group) in enumerate(list(grouped)[:-1]):
+        print (ind, end='\r')
+        for label, present in group.groupby('flock_label'):
+            future = list(grouped)[ind+1][1]
+            new_label = get_correct_label(present, future)
+            df.loc[df.datetime == future.iloc[0].datetime, 'flock_label'] = future['flock_label'].apply(swap, args=((new_label, label),))
+    return df
+
+
+def hasNext(x):
+    try:
+        return next(x)
+    except StopIteration:
+        return []
+
+
+def group_patterns_mining(cluster_history, time_threshold=5, min_samples=3):
+    endOfTime = cluster_history.datetime.max()
+    flocks = pd.DataFrame([], columns=['flocks', 'start', 'end'])
+    cluster_history_window = cluster_history.groupby('mmsi').agg({'flock_label': lambda x: window(list(x), time_threshold), 'datetime': lambda x: pd.Timestamp(min(x))})
+
+    while (len(cluster_history_window) != 0):
+        # Set the Start of Time
+        startTime = cluster_history_window.datetime.min()
+        endTime = startTime + pd.offsets.Minute(time_threshold)
+        print (f'Datetime of Interest: {startTime}', end='\r')
+
+        # Get the History Window according to the above Timestamps
+        timeFrameClusters = cluster_history_window.loc[cluster_history_window.datetime == startTime]['flock_label'].apply(lambda x: hasNext(x)).apply(tuple)
+        # Group by the History Window
+        for label_hist_window, mmsis in timeFrameClusters.groupby(timeFrameClusters):
+            if ((len(mmsis.index) >= min_samples) and (-1 not in label_hist_window)):
+                foi = flocks.loc[flocks.flocks.apply(tuple) == tuple(mmsis.index)]
+    #             if (-1 in label_hist_window):
+    #                 continue
+                    # TODO - Refine Here the End Timestamp for Existing Flocks (Minor)
+    #             else:
+                if (len(foi) != 0):
+                    flocks.at[foi.index[0], 'end'] = endTime
+                else:
+                    newFlockRow = pd.DataFrame([{'flocks': tuple(mmsis.index),  'start': startTime, 'end': endTime}], columns=['flocks', 'start', 'end'])                     
+                    flocks = flocks.append(newFlockRow, ignore_index=True)
+
+        # Prepare for Next Iteration
+        #     * Clean the Redundant Records
+        ioi = timeFrameClusters.loc[timeFrameClusters.apply(len) == 0].index
+        cluster_history_window.drop(list(ioi), inplace=True)
+        #     * Refresh the Start of Time Timestamp
+        cluster_history_window['datetime'] += pd.offsets.Minute(1)
+
+        if (startTime > pd.Timestamp(endOfTime)):
+            break
         
-    gp_history = gp_history.fillna(pd.Timestamp(gdf.datetime.unique()[-1]))
-    gp_history.end_time = pd.to_datetime(gp_history.end_time, unit='ns')
-    return gp_history.loc[(gp_history.end_time - gp_history.start_time >= np.timedelta64(time_threshold*resampling_rate, 's')) & (gp_history[mode].apply(len) >= min_samples)].reset_index(drop=True)
+    return flocks
