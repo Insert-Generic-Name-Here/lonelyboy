@@ -13,10 +13,10 @@ from scipy.spatial import distance_matrix
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import MinMaxScaler
 from shapely.geometry import Point, LineString, shape
-from lonelyboy.geospatial.metrics import haversine_distance as haversine
+from haversine import haversine
+import itertools
 
-
-
+# from lonelyboy.geospatial.metrics import haversine_distance as haversine
 
 def MinMax_Scaler(X, feature_range=(0, 1), copy=True):
     scaler = MinMaxScaler(feature_range, copy)
@@ -71,7 +71,7 @@ def index_of_cluster(item, cluster_list):
 def connected_edges(data):
     G = nx.Graph()
     G.add_edges_from(data)
-    return [list(cluster) for cluster in nx.connected_components(G)]
+    return [sorted(list(cluster)) for cluster in nx.connected_components(G)]
 
 
 def pairs_in_radius(df, radius):
@@ -182,3 +182,48 @@ def group_patterns_mining(cluster_history, mode, time_threshold=5, min_samples=3
             break
         
     return mined_patterns
+
+#### flocks v2 ####
+
+def in_radius(df, diam=500):
+    '''
+    Return pairs with distance < diam
+    '''
+    res = []
+    for ind_i, ind_j, val_i, val_j in nparray_combinations(df):
+        dist = haversine(val_i, val_j)*1000
+        if (dist<diam):
+            res.append((ind_i,ind_j))   
+    return res
+            
+
+def nparray_combinations(arr):
+    for i in range(arr.shape[0]):
+        for j in range(i+1, arr.shape[0]):
+            yield i, j, arr[i,:], arr[j,:]
+
+
+def eval_candidate(candidate, pairs):
+    '''
+    Evaluate a candidate based on if all included points exist in pairs
+    '''
+    for pair in itertools.combinations(candidate,2):
+        if pair not in pairs:
+            return False
+    return True
+
+
+def circle_cluster(timeframe, min_cardinality = 2, diam_in_meters = 500):
+    '''
+    For each connected graph, get all r-length combinations (min cardinality<r<len(sets)) and check if each of them is valid.
+    '''
+    pairs = in_radius(timeframe[['lon', 'lat']].values, diam_in_meters)
+    full_sets = connected_edges(pairs)
+    clusters = []
+    for individual_sets in full_sets:
+        # TODO MAYBE FROM BIG TO SMALL INSTEAD OF SMALL TO BIG
+        for j in range(min_cardinality,len(individual_sets)+1):
+            for candidate in itertools.combinations(individual_sets,j):
+                 if eval_candidate(candidate, pairs):
+                        clusters.append(candidate)
+    return clusters
