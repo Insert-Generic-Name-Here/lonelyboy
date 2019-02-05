@@ -9,6 +9,11 @@ from tqdm import tqdm
 import numpy as np
 
 
+def gdf_from_df(df):
+	df.geom = df[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
+	return gpd.GeoDataFrame(df, geometry='geom')
+
+
 def distance_to_nearest_port(point, ports):
 	'''
 	Calculates the minimum distance between the point and the lists of ports. Can be used to determine if the ship is sailing or not

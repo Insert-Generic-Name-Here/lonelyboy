@@ -213,17 +213,24 @@ def eval_candidate(candidate, pairs):
     return True
 
 
-def circle_cluster(timeframe, min_cardinality = 2, diam_in_meters = 500):
+def translate(candidates, sdf):
+    '''
+    Translate indexes to mmsis
+    '''
+    return tuple([sdf.iloc[candidate].mmsi for candidate in candidates])
+
+
+def circle_cluster(timeframe, min_cardinality = 2):
     '''
     For each connected graph, get all r-length combinations (min cardinality<r<len(sets)) and check if each of them is valid.
     '''
-    pairs = in_radius(timeframe[['lon', 'lat']].values, diam_in_meters)
+    pairs = in_radius(timeframe[['lon', 'lat']].values)
     full_sets = connected_edges(pairs)
     clusters = []
     for individual_sets in full_sets:
-        # TODO MAYBE FROM BIG TO SMALL INSTEAD OF SMALL TO BIG
+        # MAYBE FROM BIG TO SMALL INSTEAD OF SMALL TO BIG
         for j in range(min_cardinality,len(individual_sets)+1):
             for candidate in itertools.combinations(individual_sets,j):
                  if eval_candidate(candidate, pairs):
-                        clusters.append(candidate)
+                        clusters.append(translate(candidate, timeframe))
     return clusters
