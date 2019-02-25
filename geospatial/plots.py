@@ -8,14 +8,14 @@ import numpy as np
 from lonelyboy.geospatial.preprocessing import get_outliers
 
 
-def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15)):
+def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15), column=None):
 				'''
 				Plot one or two dataframes on top of eachother.
 
 				TODO - Add support for N Dataframes and more parameters, other that figsize.
 				'''
 				df1.crs = {'init': 'epsg:4326'}
-				ax = df1.to_crs(epsg=3857).plot(figsize=figsize,c=color[0])
+				ax = df1.to_crs(epsg=3857).plot(figsize=figsize,c=color[0], column=column)
 				if df2 is not None:
 								df2.crs = {'init': 'epsg:4326'}
 								df2.to_crs(epsg=3857).plot(figsize=figsize,c=color[1], ax=ax)
@@ -30,7 +30,7 @@ def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
 def plot_clusters(gdf, clusters):
 	label_color = pd.DataFrame([], index=gdf.index, columns=['color'])
 
-	cluster_indices = [gdf.loc[gdf.mmsi.isin(cluster)].index for cluster in clusters] 
+	cluster_indices = [gdf.loc[gdf.mmsi.isin(cluster)].index for cluster in clusters]
 	for color_idx, cluster in enumerate(cluster_indices):
 		label_color.loc[label_color.index.isin(cluster), 'color'] = color_idx
 
