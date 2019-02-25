@@ -161,16 +161,23 @@ def get_trajetory_segment(x, pois):
 		return int(pois.index(poi)-1)
 
 
-def segment_vessel(vessel, velocity_window, velocity_drop_alpha, pois_alpha, pois_window):
-	#gdf['traj_id'] = np.nan
+def segment_trajectories(gdf,  pois_alpha=80, pois_window=100, n_jobs=1, np_split=True, feature='mmsi'):
+	cores = _get_n_jobs(n_jobs)
+	if cores==1:
+		gdf = _segment_trajectories_grouped(gdf, pois_alpha, pois_window)
+	else:
+		raise NotImplementedError
+		#TODO
+		#gdf = parallelize_dataframe(gdf, _segment_trajectories_grouped, np_split=np_split, feature=feature, num_partitions=cores)
+
+	return gdf.reset_index(inplace=True, drop=True)
+
+
+def _segment_vessel(vessel, velocity_window, velocity_drop_alpha, pois_alpha, pois_window):
+	gdf['traj_id'] = np.nan
 	if len(vessel) == 1 :
-		vessel.velocity = vessel.speed
 		vessel.traj_id  = 0.0
 		return vessel
-	vessel = calculate_velocity(vessel, smoothing=True, window=velocity_window)
-	vessel = resample_geospatial(vessel)
-	vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0)
-	vessel.reset_index(inplace=True, drop=True)
 	pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
 	vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
 	return vessel
@@ -181,26 +188,57 @@ def _segment_trajectories_grouped(gdf, velocity_window, velocity_drop_alpha, poi
 	ts_from_str_datetime(gdf)
 	return gdf
 
-def segment_trajectories(gdf, velocity_window=3, velocity_drop_alpha=3, pois_alpha=80, pois_window=100, n_jobs=1, np_split=True, feature='mmsi'):
+def _get_n_jobs(n_jobs):
 	if n_jobs>cpu_count():
 		raise ValueError("n_jobs can't be more than available cpu cores")
 	if n_jobs==1:
-		_segment_trajectories_grouped(gdf, velocity_window, velocity_drop_alpha, pois_alpha, pois_window)
+		return 1
 	else:
 		if n_jobs == -1:
-			cores = cpu_count()
+			return cpu_count()
 		else:
-			cores = n_jobs
-		parallelize_dataframe(gdf, _segment_trajectories_grouped, np_split=np_split, feature=feature, num_partitions=cores)
+			return n_jobs
 
 
+def resample_and_calculate_velocity(gdf, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
+	gdf['velocity'] = np.nan
+	cores = _get_n_jobs(n_jobs)
+	if cores==1:
+		gdf = _resample_and_calculate_velocity_grouped(gdf, velocity_window=velocity_window, velocity_drop_alpha=velocity_drop_alpha, smoothing=smoothing, res_rule=res_rule, res_method=res_method, crs=crs, drop_lon_lat=drop_lon_lat, resampling_first=resampling_first, drop_outliers=drop_outliers)
+	else:
+		raise NotImplementedError
+		#TODO
+		#gdf = parallelize_dataframe(gdf, _segment_trajectories_grouped, np_split=np_split, feature=feature, num_partitions=cores)
+	return gdf.reset_index(inplace=True, drop=True)
 
-def clean_gdf(gdf, velocity_outlier_alpha=3):
+
+def _resample_and_calculate_velocity_grouped(gdf, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers):
+	gdf = gdf.groupby(['mmsi'], as_index=False).apply(_resample_and_calculate_velocity_vessel,velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
+	gdf.reset_index(inplace=True, drop=True)
+	return gdf
+
+
+def _resample_and_calculate_velocity_vessel(vessel, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs , drop_lon_lat, resampling_first, drop_outliers):
+	if len(vessel) == 1 :
+		vessel.velocity = vessel.speed
+		return vessel
+	if resampling_first:
+		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
+		vessel = calculate_velocity(vessel, smoothing=smoothing, window=velocity_window)
+	else:
+		vessel = calculate_velocity(vessel, smoothing=smoothing, window=velocity_window)
+		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
+	if drop_outliers:
+		vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0)
+	# vessel.reset_index(inplace=True, drop=True)
+	return vessel
+
+
+def clean_gdf(gdf):
 	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
 	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'], as_index=False)['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
 	gdf.reset_index(inplace=True, drop=True)
-	gdf.drop(['id', 'status'], axis=1, inplace=True)
-	gdf['velocity'], gdf['traj_id'] = np.nan, np.nan
+	gdf.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	return gdf
 
 
@@ -218,14 +256,15 @@ def partition_geospatial(gdf, feature='mmsi', num_partitions=1):
 
 
 def parallelize_dataframe(df, func, np_split=True, feature='mmsi', num_partitions=1):
-	print('starting..')
-	if np_split:
-		partitions = np.array_split(df, cpu_count())
-	else:
-		partitions = [grp[1] for grp in df.groupby(['mmsi'])]
-	print (len(partitions))
-	pool = Pool(num_partitions)
-	df = pd.concat(pool.map(func, partitions))
-	pool.close()
-	pool.join()
-	return df
+	raise NotImplementedError
+	# print('starting..')
+	# if np_split:
+	# 	partitions = np.array_split(df, cpu_count())
+	# else:
+	# 	partitions = [grp[1] for grp in df.groupby(['mmsi'])]
+	# print (len(partitions))
+	# pool = Pool(num_partitions)
+	# df = pd.concat(pool.map(func, partitions))
+	# pool.close()
+	# pool.join()
+	# return df
