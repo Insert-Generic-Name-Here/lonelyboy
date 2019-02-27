@@ -132,9 +132,10 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 
 	pois : list of the indicies where a change is detected (ex. a change in speed). These indicies can be used for trajectory segmentation.
 	'''
-
 	#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
-	diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
+	diff_series = df[feature].rolling(window).mean().diff()
+	# diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
+
 	#detect the outliers of the above series.
 	outlier_groups, (qlow, qhigh) = get_outliers(diff_series.dropna(), alpha=alpha)
 
@@ -154,6 +155,8 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 
 
 def get_trajetory_segment(x, pois):
+	#THIS IS STUPID STUPID ...STUPIDSTUPID DESIGN
+	#TODO
 	for poi in pois:
 		if x.name > poi:
 			if poi == pois[-1]: print('prob')
@@ -161,31 +164,57 @@ def get_trajetory_segment(x, pois):
 		return int(pois.index(poi)-1)
 
 
-def segment_trajectories(gdf,  pois_alpha=80, pois_window=100, n_jobs=1, np_split=True, feature='mmsi'):
+def segment_trajectories(gdf, ports, pois_alpha=80, pois_window=100, n_jobs=1, np_split=True, feature='mmsi'):
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
-		gdf = _segment_trajectories_grouped(gdf, pois_alpha, pois_window)
+		gdf = _segment_trajectories_grouped(gdf, ports, pois_alpha=pois_alpha, pois_window=pois_window)
 	else:
 		raise NotImplementedError
 		#TODO
 		#gdf = parallelize_dataframe(gdf, _segment_trajectories_grouped, np_split=np_split, feature=feature, num_partitions=cores)
 
-	return gdf.reset_index(inplace=True, drop=True)
+	return gdf
 
 
-def _segment_vessel(vessel, velocity_window, velocity_drop_alpha, pois_alpha, pois_window):
-	gdf['traj_id'] = np.nan
+def _segment_vessel(vessel, ports, pois_alpha, pois_window):
+	vessel.reset_index(drop=True, inplace=True)
 	if len(vessel) == 1 :
 		vessel.traj_id  = 0.0
 		return vessel
 	pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
-	vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
+	# OLD STUPID STUPID CODE
+	# vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
+	# NEW SMARTER ONE, I GUESS
+	# added simple semantic enrichment
+	# semantic_id = 0 -> Stationary (near port)
+	# semantic_id = 1 -> Stationary (not near port)
+	# semantic_id = 2 -> Accelerating
+	# semantic_id = 3 -> Decelerating
+	for i in range(len(pois)-1):
+		slice = vessel.iloc[pois[i]:pois[i+1]]
+		if slice.velocity.mean()<1:
+			if slice['geom'].apply(lambda x: distance_to_nearest_port(x, ports)).mean()<=0.1:
+				vessel.loc[pois[i]:pois[i+1], 'semantic_id'] = 0
+			else:
+				vessel.loc[pois[i]:pois[i+1], 'semantic_id'] = 1
+		else:
+			if slice.velocity.diff().mean()<0:
+				vessel.loc[pois[i]:pois[i+1], 'semantic_id'] = 3
+			else:
+				vessel.loc[pois[i]:pois[i+1], 'semantic_id'] = 2
+		vessel.loc[pois[i]:pois[i+1], 'traj_id'] = i
+	vessel['pois'] = [pois]*len(vessel)
+
 	return vessel
 
 
-def _segment_trajectories_grouped(gdf, velocity_window, velocity_drop_alpha, pois_alpha, pois_window):
-	gdf = gdf.groupby(['mmsi'], as_index=False).apply(segment_vessel,velocity_window, velocity_drop_alpha, pois_alpha, pois_window).reset_index(drop=True)
-	ts_from_str_datetime(gdf)
+def _segment_trajectories_grouped(gdf, ports, pois_alpha, pois_window):
+	gdf['traj_id'] = np.nan
+	gdf['pois'] = np.nan
+	gdf['semantic_id'] = np.nan
+	tqdm.pandas()
+	gdf = gdf.groupby(['mmsi'], group_keys=False).progress_apply(_segment_vessel, ports, pois_alpha, pois_window).reset_index(drop=True)
+	# ts_from_str_datetime(gdf)
 	return gdf
 
 def _get_n_jobs(n_jobs):
@@ -199,8 +228,16 @@ def _get_n_jobs(n_jobs):
 		else:
 			return n_jobs
 
+def pd2gdf(df):
+	df.geom = df.apply(lambda x: Point(x.lon, x.lat), axis=1)
+	traj = gpd.GeoDataFrame(df, geometry='geom')
+	return traj
+
 
 def resample_and_calculate_velocity(gdf, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
+	if type(gdf) == pd.core.frame.DataFrame:
+		gdf = pd2gdf(gdf)
+
 	gdf['velocity'] = np.nan
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
@@ -209,11 +246,11 @@ def resample_and_calculate_velocity(gdf, velocity_window=3, velocity_drop_alpha=
 		raise NotImplementedError
 		#TODO
 		#gdf = parallelize_dataframe(gdf, _segment_trajectories_grouped, np_split=np_split, feature=feature, num_partitions=cores)
-	return gdf.reset_index(inplace=True, drop=True)
+	return gdf
 
 
 def _resample_and_calculate_velocity_grouped(gdf, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers):
-	gdf = gdf.groupby(['mmsi'], as_index=False).apply(_resample_and_calculate_velocity_vessel,velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
+	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_resample_and_calculate_velocity_vessel,velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
 	gdf.reset_index(inplace=True, drop=True)
 	return gdf
 
@@ -236,7 +273,7 @@ def _resample_and_calculate_velocity_vessel(vessel, velocity_window, velocity_dr
 
 def clean_gdf(gdf):
 	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
-	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'], as_index=False)['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
+	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'], group_keys=False)['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
 	gdf.reset_index(inplace=True, drop=True)
 	gdf.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	return gdf
