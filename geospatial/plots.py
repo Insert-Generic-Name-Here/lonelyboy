@@ -8,14 +8,14 @@ import numpy as np
 from lonelyboy.geospatial.preprocessing import get_outliers
 
 
-def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15), column=None):
+def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15), **kwargs):
 				'''
 				Plot one or two dataframes on top of eachother.
 
 				TODO - Add support for N Dataframes and more parameters, other that figsize.
 				'''
 				df1.crs = {'init': 'epsg:4326'}
-				ax = df1.to_crs(epsg=3857).plot(figsize=figsize,c=color[0], column=column, legend=True)
+				ax = df1.to_crs(epsg=3857).plot(figsize=figsize,c=color[0], **kwargs)
 				if df2 is not None:
 								df2.crs = {'init': 'epsg:4326'}
 								df2.to_crs(epsg=3857).plot(figsize=figsize,c=color[1], ax=ax)

@@ -7,6 +7,7 @@ import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 from tqdm import tqdm
 import numpy as np
+from collections import Counter
 
 
 def gdf_from_df(df):
@@ -133,7 +134,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 	pois : list of the indicies where a change is detected (ex. a change in speed). These indicies can be used for trajectory segmentation.
 	'''
 	#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
-	diff_series = df[feature].rolling(window).mean().diff()
+	diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 	# diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 
 	#detect the outliers of the above series.
@@ -167,6 +168,7 @@ def get_trajetory_segment(x, pois):
 def segment_trajectories(gdf, ports, pois_alpha=80, pois_window=100, n_jobs=1, np_split=True, feature='mmsi'):
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
+		print(pois_alpha, pois_window)
 		gdf = _segment_trajectories_grouped(gdf, ports, pois_alpha=pois_alpha, pois_window=pois_window)
 	else:
 		raise NotImplementedError
@@ -176,12 +178,29 @@ def segment_trajectories(gdf, ports, pois_alpha=80, pois_window=100, n_jobs=1, n
 	return gdf
 
 
-def _segment_vessel(vessel, ports, pois_alpha, pois_window):
+def detect_POIs_approx(vessel, window):
+	lst = []
+	alpha = 1
+	while True:
+		lst.append(tuple(detect_POIs(vessel, alpha=alpha, window=window)[0]))
+		pois, freq = Counter(lst).most_common(1)[0]
+		print(alpha, len(pois))
+		if len(pois) == 3 or len(lst[-1]) == 2 or alpha>=500:
+			print(pois)
+			return pois
+		alpha += 1
+
+
+def _segment_vessel(vessel, ports,pois_alpha, pois_window):
 	vessel.reset_index(drop=True, inplace=True)
 	if len(vessel) == 1 :
 		vessel.traj_id  = 0.0
 		return vessel
-	pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
+
+	if pois_alpha != -1:
+		pois, _ = detect_POIs(vessel, alpha=pois_alpha, window=pois_window)
+	else:
+		pois = detect_POIs_approx(vessel, window=pois_window)
 	# OLD STUPID STUPID CODE
 	# vessel['traj_id'] = vessel.apply(get_trajetory_segment , args=(pois,), axis=1)
 	# NEW SMARTER ONE, I GUESS
@@ -204,7 +223,7 @@ def _segment_vessel(vessel, ports, pois_alpha, pois_window):
 				vessel.loc[pois[i]:pois[i+1], 'semantic_id'] = 2
 		vessel.loc[pois[i]:pois[i+1], 'traj_id'] = i
 	vessel['pois'] = [pois]*len(vessel)
-
+	print('done')
 	return vessel
 
 
@@ -212,8 +231,8 @@ def _segment_trajectories_grouped(gdf, ports, pois_alpha, pois_window):
 	gdf['traj_id'] = np.nan
 	gdf['pois'] = np.nan
 	gdf['semantic_id'] = np.nan
-	tqdm.pandas()
-	gdf = gdf.groupby(['mmsi'], group_keys=False).progress_apply(_segment_vessel, ports, pois_alpha, pois_window).reset_index(drop=True)
+	# tqdm.pandas()
+	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_segment_vessel, ports, pois_alpha, pois_window).reset_index(drop=True)
 	# ts_from_str_datetime(gdf)
 	return gdf
 
