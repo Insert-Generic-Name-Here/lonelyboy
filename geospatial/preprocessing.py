@@ -10,9 +10,16 @@ import numpy as np
 from collections import Counter
 
 
-def gdf_from_df(df):
+def read_csv_generator(file_path, chunksize=50000, sep=',', **kwargs):
+    pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
+    return pd_iter
+
+
+def gdf_from_df(df, crs=None):
+	# {'init':'epsg:4326'}
+	df['geom'] = np.nan
 	df.geom = df[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
-	return gpd.GeoDataFrame(df, geometry='geom')
+	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
 
 
 def distance_to_nearest_port(point, ports):
