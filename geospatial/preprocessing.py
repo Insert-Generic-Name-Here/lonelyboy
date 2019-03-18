@@ -49,7 +49,7 @@ def resample_geospatial(vessel, rule = '60S', method='linear', crs = {'init': 'e
 	#resample and interpolate using the method given. Linear is suggested
 	upsampled = vessel.resample(rule,on='datetime', loffset=True, kind='timestamp').first()
 	interpolated = upsampled.interpolate(method=method)
-	interpolated['real_point'] = interpolated.datetime.apply(lambda x: 1 if type(x)==pd._libs.tslibs.timestamps.Timestamp else 0)    
+	interpolated['real_point'] = interpolated.datetime.apply(lambda x: 1 if type(x)==pd._libs.tslibs.timestamps.Timestamp else 0)
 	#interpolate the geom column with the correct point objects using lat and lon
 	interpolated['geom'] = interpolated[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
 	# reset the index to normal and use the old index as new timestamp
@@ -75,12 +75,12 @@ def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 	gdf['current_loc'] = gdf.geom.apply(lambda x: (x.x,x.y))
 	gdf['next_loc'] = gdf.geom.shift(-1)
 	gdf = gdf[:-1]
-	gdf['next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
+	gdf.loc[:,'next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 	# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots)
-	gdf['velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
+	gdf.loc[:,'velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
 
 	if smoothing:
-		gdf['velocity'] = gdf['velocity'].rolling(window, center=center).mean().bfill().ffill()
+		gdf.loc[:,'velocity'] = gdf['velocity'].rolling(window, center=center).mean().bfill().ffill()
 
 	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 	gdf = gdf.loc[gdf['mmsi'] != 0]
@@ -147,7 +147,8 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 		#if a point is not a part of a concecutive list add it to the poi list
 		#that way only the first point of every group of outliers will be concidered a POI
 		for ind, point in enumerate(outlier_groups[1:-1],1):
-			if (point != outlier_groups[ind-1]+1) or (point != outlier_groups[ind+1]-1):
+			# if (point != outlier_groups[ind-1]+1) or (point != outlier_groups[ind+1]-1):
+			if (point != outlier_groups[ind-1]+1):
 				pois.append(point)
 		pois.append(len(df)-1)
 	except : # No Outliers?! Maybe you Need to Tune the Function's Parameters
@@ -169,13 +170,13 @@ def segment_trajectories(gdf,pois_alpha=80, pois_window=100, n_jobs=1, np_split=
 
 def detect_POIs_approx(vessel, window):
 	lst = []
-	alpha = 1e+5
+	alpha = 1
 	while True:
 		lst.append(tuple(detect_POIs(vessel, alpha=alpha, window=window)[0]))
 		pois, freq = Counter(lst).most_common(1)[0]
-		if len(lst[-1]) == 2 or alpha>=1e+10:
+		if len(lst[-1]) == 2 or alpha>=100:
 			return pois
-		alpha += 1e+8
+		alpha += 1
 
 
 def _segment_vessel(vessel, ports,pois_alpha, pois_window, semantic=False):
@@ -317,6 +318,7 @@ def _pipeline_apply(vessel, ports, velocity_window=3, velocity_drop_alpha=3, smo
 	Full automated pipeline. To be used on a single mmsi, either manually, or using .groupby
 	'''
 	vessel.drop_duplicates(['ts'], inplace=True)
+	vessel.sort_values('ts', inplace=True)
 	vessel.reset_index(inplace=True, drop=True)
 	vessel.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	vessel['geom'] = vessel[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
@@ -333,9 +335,17 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 	'''
 	if pre_segment_threshold != 0:
 		# split vessel into segments that correspond to a specific fishing trip
-		dfs = np.split(vessel, vessel.ts.diff(-1).abs().index[vessel.ts.diff()>60*60*pre_segment_threshold])
+		brake_points = vessel.ts.diff(-1).abs().index[vessel.ts.diff()>60*60*pre_segment_threshold]
+		dfs = np.split(vessel, brake_points)
 		# apply pipeline to each segment and concatenate
-		df_fn = pd.concat([_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1])
+		dfs_prepd = [_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
+        ####### exp #######
+		for i in range(1,len(dfs_prepd)):
+			print(dfs_prepd[i-1].traj_id.max())
+			dfs_prepd[i].loc[:,'traj_id'] = dfs_prepd[i].traj_id.apply(lambda x: x+dfs_prepd[i-1].traj_id.max()+1)
+		df_fn = pd.concat(dfs_prepd)
+		df_fn.sort_values('ts', inplace=True)
+		df_fn.reset_index(inplace=True, drop=True)
 	else:
 		df_fn = _pipeline_apply(vessel, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic)
-	return df_fn
+	return df_fn, brake_points
