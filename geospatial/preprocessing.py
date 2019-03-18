@@ -348,7 +348,6 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 		dfs_prepd = [_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
         ####### exp #######
 		for i in range(1,len(dfs_prepd)):
-			print(dfs_prepd[i-1].traj_id.max())
 			dfs_prepd[i].loc[:,'traj_id'] = dfs_prepd[i].traj_id.apply(lambda x: x+dfs_prepd[i-1].traj_id.max()+1)
 		df_fn = pd.concat(dfs_prepd)
 		df_fn.sort_values('ts', inplace=True)
