@@ -8,11 +8,11 @@ from shapely.geometry import Point, LineString, shape
 from tqdm import tqdm
 import numpy as np
 from collections import Counter
-
+import pickle
 
 def read_csv_generator(file_path, chunksize=50000, sep=',', **kwargs):
-    pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
-    return pd_iter
+	pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
+	return pd_iter
 
 
 def gdf_from_df(df, crs=None):
@@ -142,6 +142,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 	pois : list of the indicies where a change is detected (ex. a change in speed). These indicies can be used for trajectory segmentation.
 	'''
 	#calculate the 1st order difference series of the feature, while applying smoothing in both series, the original one and the difference series.
+	window = len(df)//30
 	diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 	# diff_series = df[feature].rolling(window).mean().diff().rolling(window).mean()
 
@@ -153,7 +154,7 @@ def detect_POIs(df, feature='velocity', alpha=20, window=100):
 		pois = [0,outlier_groups[0]]
 		#if a point is not a part of a concecutive list add it to the poi list
 		#that way only the first point of every group of outliers will be concidered a POI
-		for ind, point in enumerate(outlier_groups[1:-1],1):
+		for ind, point in enumerate(outlier_groups[1:],1):
 			# if (point != outlier_groups[ind-1]+1) or (point != outlier_groups[ind+1]-1):
 			if (point != outlier_groups[ind-1]+1):
 				pois.append(point)
@@ -181,7 +182,7 @@ def detect_POIs_approx(vessel, window):
 	while True:
 		lst.append(tuple(detect_POIs(vessel, alpha=alpha, window=window)[0]))
 		pois, freq = Counter(lst).most_common(1)[0]
-		if len(lst[-1]) == 2 or alpha>=100:
+		if len(lst[-1]) == 2 or alpha>=500:
 			return pois
 		alpha += 1
 
@@ -309,9 +310,9 @@ def partition_geospatial(gdf, feature='mmsi', num_partitions=1):
 def parallelize_dataframe(df, func, np_split=False, feature='mmsi', num_partitions=8):
 	 print('starting..')
 	 if np_split:
-	 	partitions = np.array_split(df, cpu_count())
+		 partitions = np.array_split(df, cpu_count())
 	 else:
-	 	partitions = [grp[1] for grp in df.groupby(['mmsi'])]
+		 partitions = [grp[1] for grp in df.groupby(['mmsi'])]
 	 print (len(partitions))
 	 pool = Pool(num_partitions)
 	 df = pd.concat(pool.map(func, partitions))
@@ -328,8 +329,10 @@ def _pipeline_apply(vessel, ports, velocity_window=3, velocity_drop_alpha=3, smo
 	vessel.sort_values('ts', inplace=True)
 	vessel.reset_index(inplace=True, drop=True)
 	vessel.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
+	vessel['traj_id'] = np.nan
+	vessel['pois'] = np.nan
 	vessel['geom'] = vessel[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
-	vessel=  gpd.GeoDataFrame(vessel, geometry='geom')
+	vessel = gpd.GeoDataFrame(vessel, geometry='geom')
 	vessel = _resample_and_calculate_velocity_vessel(vessel, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers)
 	vessel = _segment_vessel(vessel, ports, pois_alpha, pois_window, semantic)
 	return vessel
@@ -346,7 +349,7 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 		dfs = np.split(vessel, brake_points)
 		# apply pipeline to each segment and concatenate
 		dfs_prepd = [_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
-        ####### exp #######
+		###### exp #######
 		for i in range(1,len(dfs_prepd)):
 			dfs_prepd[i].loc[:,'traj_id'] = dfs_prepd[i].traj_id.apply(lambda x: x+dfs_prepd[i-1].traj_id.max()+1)
 		df_fn = pd.concat(dfs_prepd)
@@ -354,4 +357,4 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 		df_fn.reset_index(inplace=True, drop=True)
 	else:
 		df_fn = _pipeline_apply(vessel, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic)
-	return df_fn, brake_points
+	return df_fn
