@@ -24,7 +24,7 @@ def gdf_from_df(df, crs=None):
 
 def distance_to_nearest_port(point, ports):
 	'''
-	Calculates the minimum distance between the point and the lists of ports. Can be used to determine if the ship is sailing or not
+	Calculates the minimum distance between the point and the lists of ports. Can be used to determine if the ship is sailing or not.
 	'''
 	return ports.geom.distance(point).min()
 
@@ -167,7 +167,7 @@ def segment_trajectories(gdf,pois_alpha=80, pois_window=100, n_jobs=1, np_split=
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
 		print(pois_alpha, pois_window)
-		gdf = _segment_trajectories_grouped(gdf, ports, pois_alpha=pois_alpha, pois_window=pois_window)
+		gdf = _segment_trajectories_grouped(gdf, pois_alpha=pois_alpha, pois_window=pois_window)
 	else:
 		#TODO
 		gdf = parallelize_dataframe(gdf, _segment_trajectories_grouped)
@@ -186,7 +186,7 @@ def detect_POIs_approx(vessel, window):
 		alpha += 1
 
 
-def _segment_vessel(vessel, ports,pois_alpha, pois_window, semantic=False):
+def _segment_vessel(vessel, ports, pois_alpha, pois_window, semantic=False):
 	vessel.reset_index(drop=True, inplace=True)
 	if len(vessel) == 1 :
 		vessel.traj_id  = 0.0
@@ -343,7 +343,10 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 	if pre_segment_threshold != 0:
 		# split vessel into segments that correspond to a specific fishing trip
 		brake_points = vessel.ts.diff(-1).abs().index[vessel.ts.diff()>60*60*pre_segment_threshold]
-		dfs = np.split(vessel, brake_points)
+		try:
+			dfs = np.split(vessel, brake_points)
+		except ValueError:
+			return vessel, None
 		# apply pipeline to each segment and concatenate
 		dfs_prepd = [_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
         ####### exp #######
