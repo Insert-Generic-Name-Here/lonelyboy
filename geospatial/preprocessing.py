@@ -358,3 +358,87 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 	else:
 		df_fn = _pipeline_apply(vessel, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic)
 	return df_fn, brake_points
+
+
+def create_port_bounds(ports, port_radius=2000):
+	'''
+	Given some Datapoints, create a circular bound of _port_radius_ kilometers.
+	'''
+	init_crs = ports.crs
+	# We convert to EPSG-3310 is because the -euclidean- distance between two points is returned in meters.
+	# So the buffer function creates a circle with radius _port_radius_ meters from the center point (i.e the port's location point).
+	ports.loc[:, 'geom'] = ports.geom.to_crs(epsg=3310).buffer(port_radius).to_crs(init_crs)
+	# After we create the ports bounding circle we convert back to its previous CRS.
+	return ports
+
+
+def segment_trajectories_v2(vessel, ports):
+	'''
+	Segment trajectories based on port entrance/exit
+	'''
+	sindex = vessel.sindex # create the spatial index (r-tree) of the vessel's data points
+
+	# find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
+	points_within_geometry = pd.DataFrame()
+	for poly in ports.geom:
+		# find approximate matches with r-tree, then precise matches from those approximate ones
+		possible_matches_index = list(sindex.intersection(poly.bounds))
+		possible_matches = vessel.iloc[possible_matches_index]
+		precise_matches = possible_matches[possible_matches.intersects(poly)]
+		points_within_geometry = points_within_geometry.append(precise_matches)
+		
+	points_within_geometry = points_within_geometry.drop_duplicates(subset=['mmsi', 'ts'])
+	points_outside_geometry = vessel[~vessel.isin(points_within_geometry)].dropna()
+
+	vessel.loc[:,'traj_id'] = np.nan
+	# When we create the _traj_id_ column, we label each record with 0, 
+	# if it's outside the port's radius and -1 if it's inside the port's radius. 
+	vessel.loc[vessel.index.isin(points_within_geometry.index), 'traj_id'] = -1
+	vessel.loc[vessel.index.isin(points_outside_geometry.index), 'traj_id'] = 0
+
+	# we drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
+	vessel = vessel.loc[vessel.traj_id[vessel.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
+
+	dfs = np.split(vessel, vessel.loc[vessel.traj_id == -1].index)
+	# then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
+	for i in range(1,len(dfs)):
+		if (len(dfs[i]) == 1):
+			dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: dfs[i-1].traj_id.max())
+		else:
+			dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: x+dfs[i-1].traj_id.max()+1)				
+
+	df_fn = pd.concat(dfs)
+	df_fn.sort_values('ts', inplace=True)
+	df_fn.reset_index(inplace=True, drop=True)
+	return df_fn
+
+
+def segment_resample_and_tag_v2(vessel, ports, port_radius=2000, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, smoothing=False, window=15, center=False, pois_alpha=-1, pois_window=100, semantic=False):
+	'''
+	After the Segmentation Stage, for each sub-trajectory:
+	  * we resample each trajectory
+	  * calculate the velocity (per-point)
+	  * we use our implementation on trajectory segmentation
+	    in order to add tags regarding the vessel's activity
+	'''
+	ports = create_port_bounds(ports, port_radius=port_radius)
+	segmented_trajectories = segment_trajectories_v2(vessel, ports)
+	
+	tmp = []
+	for traj_id in segmented_trajectories.traj_id.unique():
+		sub_traj = segmented_trajectories.loc[segmented_trajectories.traj_id == traj_id]
+		tmp.append(resample_geospatial(sub_traj, rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat))
+    
+	vessel_fn = pd.concat((sub_traj for sub_traj in tmp), ignore_index=True)
+
+	tmp = []
+	for traj_id in vessel_fn.traj_id.unique():
+		sub_traj = vessel_fn.loc[vessel_fn.traj_id == traj_id]
+		sub_traj = calculate_velocity(sub_traj, smoothing=smoothing, window=window, center=center)
+		# TODO: Adjust _segment_vessel function to make use of the status codes (as presented in thesis-tasks doc) as well as the sub_traj_id column
+		sub_traj_tagged = _segment_vessel(sub_traj.copy(), None, pois_alpha=pois_alpha, pois_window=pois_window, semantic=semantic)
+		sub_traj['sub_traj_id'] = sub_traj_tagged.traj_id.values
+		tmp.append(sub_traj)
+    
+	vessel_fn = pd.concat((sub_traj for sub_traj in tmp), ignore_index=True)
+	return vessel_fn
