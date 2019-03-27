@@ -372,11 +372,14 @@ def create_port_bounds(ports, port_radius=2000):
 	return ports
 
 
-def segment_trajectories_v2(vessel, ports):
+def segment_trajectories_v2(vessel, ports, port_radius=2000):
 	'''
 	Segment trajectories based on port entrance/exit
 	'''
 	sindex = vessel.sindex # create the spatial index (r-tree) of the vessel's data points
+
+	if (ports.geom.type == 'Point').all():
+		ports = create_port_bounds(ports, port_radius=port_radius)
 
 	# find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
 	points_within_geometry = pd.DataFrame()
@@ -388,7 +391,7 @@ def segment_trajectories_v2(vessel, ports):
 		points_within_geometry = points_within_geometry.append(precise_matches)
 		
 	points_within_geometry = points_within_geometry.drop_duplicates(subset=['mmsi', 'ts'])
-	points_outside_geometry = vessel[~vessel.isin(points_within_geometry)].dropna()
+	points_outside_geometry = vessel[~vessel.isin(points_within_geometry)].dropna(how='all')
 
 	vessel.loc[:,'traj_id'] = np.nan
 	# When we create the _traj_id_ column, we label each record with 0, 
@@ -398,8 +401,12 @@ def segment_trajectories_v2(vessel, ports):
 
 	# we drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
 	vessel = vessel.loc[vessel.traj_id[vessel.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
+	vessel.reset_index(inplace=True, drop=True)
 
 	dfs = np.split(vessel, vessel.loc[vessel.traj_id == -1].index)
+	dfs = [df for df in dfs if len(df) > 2]    # rempve the fragments that are empty
+	dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
+
 	# then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
 	for i in range(1,len(dfs)):
 		if (len(dfs[i]) == 1):
@@ -430,7 +437,7 @@ def segment_resample_and_tag_v2(vessel, ports, port_radius=2000, rule = '60S', m
 		tmp.append(resample_geospatial(sub_traj, rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat))
     
 	vessel_fn = pd.concat((sub_traj for sub_traj in tmp), ignore_index=True)
-
+	
 	tmp = []
 	for traj_id in vessel_fn.traj_id.unique():
 		sub_traj = vessel_fn.loc[vessel_fn.traj_id == traj_id]
