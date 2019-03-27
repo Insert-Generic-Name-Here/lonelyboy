@@ -404,7 +404,8 @@ def segment_trajectories_v2(vessel, ports, port_radius=2000):
 	vessel.reset_index(inplace=True, drop=True)
 
 	dfs = np.split(vessel, vessel.loc[vessel.traj_id == -1].index)
-	dfs = [df for df in dfs if len(df) > 2]    # rempve the fragments that are empty
+	dfs = [df for df in dfs if len(df) > 0]    # remove the fragments that are empty
+	# dfs = [df for df in dfs if len(df) >= 2]    # remove the fragments that have at most 1 point
 	dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
 
 	# then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
