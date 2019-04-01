@@ -8,23 +8,25 @@ import numpy as np
 from lonelyboy.geospatial.preprocessing import get_outliers
 
 
-def map_plot(df1, df2 = None, color=['r', 'g'], figsize = (15,15), **kwargs):
-				'''
-				Plot one or two dataframes on top of eachother.
+def map_plot(df1, df2 = None, title=None, fontsize=25, color=['r', 'g'], figsize = (15,15), **kwargs):
+	'''
+	Plot one or two dataframes on top of eachother.
 
-				TODO - Add support for N Dataframes and more parameters, other that figsize.
-				'''
-				df1.crs = {'init': 'epsg:4326'}
-				ax = df1.to_crs(epsg=3857).plot(figsize=figsize,c=color[0], **kwargs)
-				if df2 is not None:
-								df2.crs = {'init': 'epsg:4326'}
-								df2.to_crs(epsg=3857).plot(figsize=figsize,c=color[1], ax=ax)
-				ctx.add_basemap(ax)
+	TODO - Add support for N Dataframes and more parameters, other that figsize.
+	'''
+	df1.crs = {'init': 'epsg:4326'}
+	ax = df1.to_crs(epsg=3857).plot(figsize=figsize,color=color[0], **kwargs)
+	if title is not None:
+		ax.set_title(title, fontsize=fontsize)
+	if df2 is not None:
+		df2.crs = {'init': 'epsg:4326'}
+		df2.to_crs(epsg=3857).plot(figsize=figsize,color=color[1], ax=ax, **kwargs)
+	ctx.add_basemap(ax)
 
 
 def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
-				plt.axvline(x=min(get_outliers(gdf[feature], alpha=alpha)), c=color)
-				plt.axvline(x=max(get_outliers(gdf[feature], alpha=alpha)), c=color)
+	plt.axvline(x=min(get_outliers(gdf[feature], alpha=alpha)), c=color)
+	plt.axvline(x=max(get_outliers(gdf[feature], alpha=alpha)), c=color)
 
 
 def plot_clusters(gdf, clusters):
