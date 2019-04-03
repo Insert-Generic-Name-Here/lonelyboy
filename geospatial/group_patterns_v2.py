@@ -93,7 +93,7 @@ def get_current_clusters(sdf, ts, diam=1000, circular=True):
 	return present
 
 
-def present_is_subset_of_past(present, past, last_ts):
+def present_new_or_subset_of_past(present, past, last_ts):
 	'''
 	Find and treat current clusters that exist in the past as a subset of a flock (used when flocks break apart to many smaller ones).
 	'''
@@ -142,7 +142,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 			last_ts			= ts
 			continue
 
-		new_subsets 		= present_is_subset_of_past(present, mined_patterns, last_ts)
+		new_subsets 		= present_new_or_subset_of_past(present, mined_patterns, last_ts)
 		old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
 
 		if len(new_subsets)==0:
