@@ -112,7 +112,7 @@ def past_is_subset_or_set_of_present(present, past, ts, last_ts):
 	Find and propagate a flock if it's subset of a current cluster.
 	'''
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
-	to_keep = past.apply(lambda x: (True in [set(x.clusters) <= set(val) for val in present.clusters.values]) and (x.et == last_ts), axis=1)
+	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) <= set(val) for val in present.clusters.values]), axis=1)
 	past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
 	return past
