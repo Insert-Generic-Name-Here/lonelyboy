@@ -130,6 +130,8 @@ def check_for_checkpoint(df_checksum, params):
 		ckpnt = io.load_pickle('gp_checkpoint.pckl')
 		if ckpnt['checksum'] == df_checksum and ckpnt['params'] == params:
 			return (ckpnt['current_ts'], ckpnt['last_ts'], ckpnt['patterns'], ckpnt['ind'])
+		else:
+			return False
 	except:
 		return False
 
@@ -155,7 +157,6 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 
 	print('CHECK ', df.datetime.min())
 	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
-
 
 		if checkpoints and start != ind and ind % checkpoint_interval == 0 :
 			ckpnt = {'checksum': df_checksum, 'params': params, 'current_ts': ts, 'last_ts': last_ts, 'patterns': mined_patterns, 'ind': ind}
