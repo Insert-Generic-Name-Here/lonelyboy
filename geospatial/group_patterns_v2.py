@@ -140,7 +140,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 	total = df.datetime.nunique()
 	if checkpoints:
 		print('[+] Looking for checkpoint...')
-		checkpoint_interval = round(checkpoints_freq*len(df))
+		checkpoint_interval = round(checkpoints_freq*df.datetime.nunique())
 		print(checkpoint_interval)
 		df_checksum = io.get_checksum_of_dataframe(df)
 		params = {'mode': mode, 'min_diameter':min_diameter, 'min_cardinality':min_cardinality, 'time_threshold':time_threshold}
