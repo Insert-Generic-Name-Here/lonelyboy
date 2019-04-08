@@ -11,8 +11,8 @@ import datetime
 import time, datetime
 
 import os, sys
-sys.path.append(os.path.join(os.path.expanduser('~'), 'Code'))
 from lonelyboy.geospatial import preprocessing as gspp
+from lonelyboy.distributed import io
 
 
 def pairs_in_radius(df, diam=1000):
@@ -125,10 +125,43 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
-def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, save_result=True):
-	# circular (flag for convoys/flocks)	-> mode	(string; flocks(f)|convoys(c)|spherical swarms(fs)|dense swarms(cs))
+def check_for_checkpoint(df_checksum, params):
+	try:
+		ckpnt = io.load_pickle('gp_checkpoint.pckl')
+		if ckpnt['checksum'] == df_checksum and ckpnt['params'] == params:
+			return (ckpnt['current_ts'], ckpnt['last_ts'], ckpnt['patterns'], ckpnt['ind'])
+	except:
+		return False
 
-	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('ts')), total=df.datetime.nunique()):
+def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.001, save_result=True):
+	# circular (flag for convoys/flocks)	-> mode	(string; flocks(f)|convoys(c)|spherical swarms(fs)|dense swarms(cs))
+	save_name = f'{mode}_min_diameter{min_diameter}_time_threshold{time_threshold}_min_cardinality{min_cardinality}.csv'
+	start = 0
+	total = df.datetime.nunique()
+	if checkpoints:
+		print('[+] Looking for checkpoint...')
+		checkpoint_interval = round(checkpoints_freq*len(df))
+		print(checkpoint_interval)
+		df_checksum = io.get_checksum_of_dataframe(df)
+		params = {'mode': mode, 'min_diameter':min_diameter, 'min_cardinality':min_cardinality, 'time_threshold':time_threshold}
+
+		ckpnt = check_for_checkpoint(df_checksum, params)
+		if ckpnt:
+			print('[+] Loading from checkpoint...')
+			ts, last_ts, mined_patterns, start = ckpnt
+			df = df.loc[df.datetime >= ts]
+		else:
+			print('[-] No checkoint available')
+
+	print('CHECK ', df.datetime.min())
+	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
+
+
+		if checkpoints and start != ind and ind % checkpoint_interval == 0 :
+			ckpnt = {'checksum': df_checksum, 'params': params, 'current_ts': ts, 'last_ts': last_ts, 'patterns': mined_patterns, 'ind': ind}
+			io.save_pickle(ckpnt,'gp_checkpoint.pckl')
+			print('[+] Saving checkpoint...')
+
 		if mode == 'flocks' or mode == 'f':
 			present = get_current_clusters(sdf, ts, min_diameter, circular=True)
 		elif mode == 'convoys' or mode == 'c':
@@ -166,15 +199,11 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.dur>time_threshold)) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
 		last_ts = ts
 
+
 	# keep this df and use it again as the db for the real time implementation
 	# print('Calculating mean velocity per flock...')
 	# mined_patterns['mean_vel'] = np.nan
 	# mined_patterns['mean_vel'] = mined_patterns.apply(lambda x: df.loc[(df.mmsi.isin(eval(x.clusters))) & (df.ts >= x.st) & (df.ts <= x.et)].velocity.mean(), axis=1)
 	if save_result:
 		print('Saving Result...')
-		if mode == 'flocks' or mode == 'f':
-			mined_patterns.to_csv(f'flocks_min_diameter{min_diameter}_time_threshold{time_threshold}_min_cardinality{min_cardinality}.csv', index=False)
-		elif mode == 'convoys' or mode == 'c':
-			mined_patterns.to_csv(f'convoys_min_diameter{min_diameter}_time_threshold{time_threshold}_min_cardinality{min_cardinality}.csv', index=False)
-		elif mode == 'swarms' or mode == 's':
-			raise NotImplementedError('Current mode is not Implemented atm.')
+		mined_patterns.to_csv(save_name, index=False)
