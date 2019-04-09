@@ -13,6 +13,7 @@ import time, datetime
 import os, sys
 from lonelyboy.geospatial import preprocessing as gspp
 from lonelyboy.distributed import io
+from operator import xor
 
 
 def pairs_in_radius(df, diam=1000):
@@ -112,7 +113,9 @@ def past_is_subset_or_set_of_present(present, past, ts, last_ts):
 	Find and propagate a flock if it's subset of a current cluster.
 	'''
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
-	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) <= set(val) for val in present.clusters.values]), axis=1)
+	if past.empty:
+		return past
+	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) <= set(val) for val in present.clusters.values]) , axis=1)
 	past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
 	return past
@@ -135,11 +138,10 @@ def check_for_checkpoint(df_checksum, params):
 	except:
 		return False
 
-def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.001, save_result=True):
+def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.1, save_result=True):
 	# circular (flag for convoys/flocks)	-> mode	(string; flocks(f)|convoys(c)|spherical swarms(fs)|dense swarms(cs))
 	save_name = f'{mode}_min_diameter{min_diameter}_time_threshold{time_threshold}_min_cardinality{min_cardinality}.csv'
-	start = 0
-	total = df.datetime.nunique()
+
 	if checkpoints:
 		print('[+] Looking for checkpoint...')
 		checkpoint_interval = round(checkpoints_freq*df.datetime.nunique())
@@ -155,7 +157,34 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		else:
 			print('[-] No checkoint available')
 
-	print('CHECK ', df.datetime.min())
+
+	mined_patterns,_,_ = mine_patterns(df, mode, min_diameter=min_diameter, min_cardinality=min_cardinality, time_threshold=time_threshold, checkpoints=checkpoints, checkpoints_freq=checkpoints_freq)
+
+
+	# keep this df and use it again as the db for the real time implementation
+	# print('Calculating mean velocity per flock...')
+	# mined_patterns['mean_vel'] = np.nan
+	# mined_patterns['mean_vel'] = mined_patterns.apply(lambda x: df.loc[(df.mmsi.isin(eval(x.clusters))) & (df.ts >= x.st) & (df.ts <= x.et)].velocity.mean(), axis=1)
+	if save_result:
+		print('Saving Result...')
+		mined_patterns.to_csv(save_name, index=False)
+
+
+def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
+	if not total:
+		total = df.datetime.nunique()
+
+	if checkpoints:
+		checkpoint_interval = round(checkpoints_freq*df.datetime.nunique())
+
+
+	if start != 0:
+		if (not last_ts) and (not mined_patterns):
+			raise
+
+
+
+
 	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
 
 		if checkpoints and start != ind and ind % checkpoint_interval == 0 :
@@ -175,6 +204,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 			mined_patterns	= present
 			last_ts			= ts
 			continue
+
 
 		new_subsets 		= present_new_or_subset_of_past(present, mined_patterns, last_ts)
 		old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
@@ -199,12 +229,4 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		# 3. Num of vessels in flock >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
 		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.dur>time_threshold)) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
 		last_ts = ts
-
-
-	# keep this df and use it again as the db for the real time implementation
-	# print('Calculating mean velocity per flock...')
-	# mined_patterns['mean_vel'] = np.nan
-	# mined_patterns['mean_vel'] = mined_patterns.apply(lambda x: df.loc[(df.mmsi.isin(eval(x.clusters))) & (df.ts >= x.st) & (df.ts <= x.et)].velocity.mean(), axis=1)
-	if save_result:
-		print('Saving Result...')
-		mined_patterns.to_csv(save_name, index=False)
+	return mined_patterns, ind+1, last_ts
