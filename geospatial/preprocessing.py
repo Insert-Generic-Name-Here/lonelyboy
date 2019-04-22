@@ -69,6 +69,7 @@ def resample_geospatial(vessel, rule = '60S', method='linear', crs = {'init': 'e
 
 
 def calculate_velocity(gdf, smoothing=False, window=15, center=False):
+def calculate_velocity(gdf):
 	'''
 	Return given dataframe with an extra velocity column that is calculated using the distance covered in a given amount of time
 	TODO - use the get distance method to save some space
@@ -85,9 +86,6 @@ def calculate_velocity(gdf, smoothing=False, window=15, center=False):
 	gdf.loc[:,'next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
 	# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots)
 	gdf.loc[:,'velocity'] = gdf[['current_loc', 'next_loc']].apply(lambda x : haversine(x[0], x[1])*0.539956803 , axis=1).multiply(3600/gdf.ts.diff(-1).abs())
-
-	if smoothing:
-		gdf.loc[:,'velocity'] = gdf['velocity'].rolling(window, center=center).mean().bfill().ffill()
 
 	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
 	gdf = gdf.loc[gdf['mmsi'] != 0]
@@ -225,12 +223,14 @@ def _segment_vessel(vessel, ports, pois_alpha, pois_window, semantic=False):
 def _segment_trajectories_grouped(gdf, pois_alpha=20, pois_window=100):
 	gdf['traj_id'] = np.nan
 	gdf['pois'] = np.nan
-	gdf['semantic_id'] = np.nan
-	ports = pd.read_pickle('ports.pckl')
+	# gdf['semantic_id'] = np.nan
+	# ports = pd.read_pickle('ports.pckl')
+	ports = None
 # tqdm.pandas()
 	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_segment_vessel, ports, pois_alpha, pois_window).reset_index(drop=True)
 	# ts_from_str_datetime(gdf)
 	return gdf
+
 
 def _get_n_jobs(n_jobs):
 	if n_jobs>cpu_count():
@@ -249,35 +249,35 @@ def pd2gdf(df):
 	return traj
 
 
-def resample_and_calculate_velocity(gdf, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
+def resample_and_calculate_velocity(gdf, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
 	if type(gdf) == pd.core.frame.DataFrame:
 		gdf = pd2gdf(gdf)
 
 	gdf['velocity'] = np.nan
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
-		gdf = _resample_and_calculate_velocity_grouped(gdf, velocity_window=velocity_window, velocity_drop_alpha=velocity_drop_alpha, smoothing=smoothing, res_rule=res_rule, res_method=res_method, crs=crs, drop_lon_lat=drop_lon_lat, resampling_first=resampling_first, drop_outliers=drop_outliers)
+		gdf = _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=velocity_drop_alpha, res_rule=res_rule, res_method=res_method, crs=crs, drop_lon_lat=drop_lon_lat, resampling_first=resampling_first, drop_outliers=drop_outliers)
 	else:
 		#TODO
 		gdf = parallelize_dataframe(gdf, _resample_and_calculate_velocity_grouped)
 	return gdf
 
 
-def _resample_and_calculate_velocity_grouped(gdf, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False):
-	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_resample_and_calculate_velocity_vessel,velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
+def _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False):
+	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_resample_and_calculate_velocity_vessel, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
 	gdf.reset_index(inplace=True, drop=True)
 	return gdf
 
 
-def _resample_and_calculate_velocity_vessel(vessel, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs , drop_lon_lat, resampling_first, drop_outliers):
+def _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, res_rule, res_method, crs , drop_lon_lat, resampling_first, drop_outliers):
 	if len(vessel) == 1 :
 		vessel.velocity = vessel.speed
 		return vessel
 	if resampling_first:
 		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
-		vessel = calculate_velocity(vessel, smoothing=smoothing, window=velocity_window)
+		vessel = calculate_velocity(vessel)
 	else:
-		vessel = calculate_velocity(vessel, smoothing=smoothing, window=velocity_window)
+		vessel = calculate_velocity(vessel)
 		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
 	if drop_outliers:
 		vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0)
@@ -289,7 +289,7 @@ def clean_gdf(gdf):
 	gdf.drop_duplicates(['ts', 'mmsi'], inplace=True)
 	gdf.drop([item for sublist in [x for x in gdf.groupby(['mmsi'], group_keys=False)['ts'].apply(lambda x: get_outliers(x)[0]) if x != []] for item in sublist], axis=0, inplace=True)
 	gdf.reset_index(inplace=True, drop=True)
-	gdf.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
+	# gdf.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	return gdf
 
 
@@ -320,7 +320,7 @@ def parallelize_dataframe(df, func, np_split=False, feature='mmsi', num_partitio
 	 return df
 
 
-def _pipeline_apply(vessel, ports, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False ):
+def _pipeline_apply(vessel, ports, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False ):
 	'''
 	Full automated pipeline. To be used on a single mmsi, either manually, or using .groupby
 	'''
@@ -330,12 +330,12 @@ def _pipeline_apply(vessel, ports, velocity_window=3, velocity_drop_alpha=3, smo
 	vessel.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	vessel['geom'] = vessel[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
 	vessel=  gpd.GeoDataFrame(vessel, geometry='geom')
-	vessel = _resample_and_calculate_velocity_vessel(vessel, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers)
+	vessel = _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers)
 	vessel = _segment_vessel(vessel, ports, pois_alpha, pois_window, semantic)
 	return vessel
 
 
-def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_window=3, velocity_drop_alpha=3, smoothing=True, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False):
+def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False):
 	'''
 	Function that calls _pipeline_apply.
 	pre_segment_threshold is the number of hours that a transmitter needs to be off in order to brake up a trajectory into usefull ones. If 0 then do not pre segment
@@ -348,7 +348,7 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 		except ValueError:
 			return vessel, None
 		# apply pipeline to each segment and concatenate
-		dfs_prepd = [_pipeline_apply(df, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
+		dfs_prepd = [_pipeline_apply(df, ports, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
         ####### exp #######
 		for i in range(1,len(dfs_prepd)):
 			dfs_prepd[i].loc[:,'traj_id'] = dfs_prepd[i].traj_id.apply(lambda x: x+dfs_prepd[i-1].traj_id.max()+1)
@@ -356,7 +356,7 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_windo
 		df_fn.sort_values('ts', inplace=True)
 		df_fn.reset_index(inplace=True, drop=True)
 	else:
-		df_fn = _pipeline_apply(vessel, ports, velocity_window, velocity_drop_alpha, smoothing, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic)
+		df_fn = _pipeline_apply(vessel, ports, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic)
 	return df_fn, brake_points
 
 
@@ -373,7 +373,7 @@ def create_port_bounds(ports, epsg=2154, port_radius=2000):
 	return ports2
 
 
-def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154):
+def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154, cardinality_threshold=2):
 	'''
 	Segment trajectories based on port entrance/exit
 	'''
@@ -406,7 +406,9 @@ def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154):
 
 	dfs = np.split(vessel, vessel.loc[vessel.traj_id == -1].index)
 	# dfs = [df for df in dfs if len(df) > 0]    # remove the fragments that are empty
-	dfs = [df for df in dfs if len(df) >= 2]    # remove the fragments that have at most 1 point
+	# print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
+	dfs = [df for df in dfs if len(df) >= cardinality_threshold]    # remove the fragments that have at most 1 point
+	# print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
 	
 	if (len(dfs) == 0):
 		# return gpd.GeoDataFrame([], columns=['mmsi', 'speed', 'lon', 'lat', 'ts', 'geom', 'traj_id', 'traj_id_12h_gap'], geometry='geom', crs={'init':'epsg:4326'}) 
@@ -426,7 +428,7 @@ def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154):
 	return df_fn
 
 
-def __temporal_segment(vessel, temporal_threshold=12):
+def __temporal_segment(vessel, temporal_threshold=12, cardinality_threshold=2):
 	if len(vessel) == 0:
 		# return [gpd.GeoDataFrame([], columns=['mmsi', 'speed', 'lon', 'lat', 'ts', 'geom', 'traj_id', 'traj_id_12h_gap'], geometry='geom', crs={'init':'epsg:4326'})]
 		vessel['traj_id_12h_gap'] = None
@@ -444,15 +446,13 @@ def __temporal_segment(vessel, temporal_threshold=12):
 			df = sdf.reset_index()
 			break_points = df.ts.diff(-1).abs().index[df.ts.diff()>60*60*temporal_threshold]
 			
-			if (len(break_points) > 0):
-					dfs = np.split(df, break_points)
-			else:
-					dfs = [df]
-					
+			dfs = np.split(df, break_points)
 			dfs_temporal.extend(dfs)
 			#NOTE #1: Check np.split if break_points=[], returns traj
 	
-	dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= 2]
+	# print (f'@Temporal-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
+	dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= cardinality_threshold]
+	# print (f'@Temporal-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
 	print(f"Segments After: {len(dfs_temporal)}")
 	
 	if (len(dfs_temporal) == 0):
@@ -466,8 +466,7 @@ def __temporal_segment(vessel, temporal_threshold=12):
 	return dfs_temporal
 
 
-def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, smoothing=False, window=15, center=False):                                               
-	# def segment_resample_and_tag_v2(vessel, ports, port_radius=2000, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, smoothing=False, window=15, center=False, pois_alpha=-1, pois_window=100, semantic=False):
+def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, cardinality_threshold=2, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):                                               
 	'''
 	After the Segmentation Stage, for each sub-trajectory:
 	  * we resample each trajectory
@@ -476,14 +475,18 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 	    in order to add tags regarding the vessel's activity
 	'''
 	port_bounds = create_port_bounds(ports, epsg=port_epsg, port_radius=port_radius)
-	port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds)
-	temporal_segmented_trajectories = __temporal_segment(port_segmented_trajectories, temporal_threshold=temporal_threshold)
+	port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds, cardinality_threshold=cardinality_threshold)
+	temporal_segmented_trajectories = __temporal_segment(port_segmented_trajectories, temporal_threshold=temporal_threshold, cardinality_threshold=cardinality_threshold)
 
 	for idx in range(0, len(temporal_segmented_trajectories)):
 		if len(temporal_segmented_trajectories[idx]) == 0:
 			continue
+		# print (f'@Temporal-Segmentation BEFORE RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
+		print (temporal_segmented_trajectories[idx])
 		temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
-		temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx], smoothing=smoothing, window=window, center=center)
+
+		# print (f'@Temporal-Segmentation AFTER RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
+		temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
 
 	# tmp = []
 	# for traj_id in segmented_trajectories.traj_id.unique():
@@ -493,7 +496,7 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 	# tmp = []
 	# for traj_id in vessel_fn.traj_id.unique():
 	# 	sub_traj = vessel_fn.loc[vessel_fn.traj_id == traj_id]
-	# 	sub_traj = calculate_velocity(sub_traj, smoothing=smoothing, window=window, center=center)
+	# 	sub_traj = calculate_velocity(sub_traj)
 	# 	# TODO: Adjust _segment_vessel function to make use of the status codes (as presented in thesis-tasks doc) as well as the sub_traj_id column
 	# 	# sub_traj_tagged = _segment_vessel(sub_traj.copy(), None, pois_alpha=pois_alpha, pois_window=pois_window, semantic=semantic)
 	# 	# sub_traj['sub_traj_id'] = sub_traj_tagged.traj_id.values
