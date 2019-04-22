@@ -68,10 +68,74 @@ def resample_geospatial(vessel, rule = '60S', method='linear', crs = {'init': 'e
 	return gpd.GeoDataFrame(interpolated, crs = crs, geometry='geom')
 
 
-def calculate_velocity(gdf, smoothing=False, window=15, center=False):
+def calculate_angle(point1, point2):
+    '''
+		Calculating initial bearing between two points
+    '''
+    lon1, lat1 = point1[0], point1[1]
+    lon2, lat2 = point2[0], point2[1]
+
+    dlat = (lat2 - lat1)
+    dlon = (lon2 - lon1)
+    numerator = np.sin(dlon) * np.cos(lat2)
+    denominator = (
+        np.cos(lat1) * np.sin(lat2) -
+        (np.sin(lat1) * np.cos(lat2) * np.cos(dlon))
+    )
+
+    theta = np.arctan2(numerator, denominator)
+    theta_deg = (np.degrees(theta) + 360) % 360
+    return theta_deg
+
+
+def calculate_bearing(gdf):
+	'''
+	Return given dataframe with an extra bearing column that
+	is calculated using the course over ground (in degrees in range [0, 360))
+	'''
+	# if there is only one point in the trajectory its bearing will be the one measured from the accelerometer
+	if len(gdf) == 1:
+		gdf['bearing'] = gdf.course
+		return gdf
+
+	# create columns for current and next location. Drop the last columns that contains the nan value
+	gdf['current_loc'] = gdf.geom.apply(lambda x: (x.x,x.y))
+	gdf['next_loc'] = gdf.geom.shift(-1)
+	gdf = gdf[:-1]
+	gdf.loc[:,'next_loc'] = gdf.next_loc.apply(lambda x : (x.x,x.y))
+	# get the distance traveled in n-miles and multiply by the rate given (3600/secs for knots)
+	gdf.loc[:,'bearing'] = gdf[['current_loc', 'next_loc']].apply(lambda x: calculate_angle(x[0], x[1]), axis=1).bfill().ffill()
+
+	gdf.drop(['current_loc', 'next_loc'], axis=1, inplace=True)
+	gdf = gdf.loc[gdf['mmsi'] != 0]
+	gdf.dropna(subset=['mmsi', 'geom'], inplace=True)
+
+	return gdf
+
+
+def calculate_acceleration(gdf):
+	'''
+	Return given dataframe with an extra acceleration column that
+	is calculated using the rate of change of velocity over time.
+	'''
+	# if there is only one point in the trajectory its acceleration will be zero (i.e. constant speed)
+	if len(gdf) == 1:
+		gdf['acceleration'] = 0
+		return gdf
+
+	gdf['acceleration'] = gdf.velocity.diff().divide(gdf.ts.diff())
+	# gdf['acceleration'] = gdf.velocity.diff(-1)
+
+	gdf = gdf.loc[gdf['mmsi'] != 0]
+	gdf.dropna(subset=['mmsi', 'geom'], inplace=True)
+
+	return gdf.fillna(0)
+
+
 def calculate_velocity(gdf):
 	'''
-	Return given dataframe with an extra velocity column that is calculated using the distance covered in a given amount of time
+	Return given dataframe with an extra velocity column that 
+	is calculated using the distance covered in a given amount of time.
 	TODO - use the get distance method to save some space
 	'''
 	# if there is only one point in the trajectory its velocity will be the one measured from the speedometer
