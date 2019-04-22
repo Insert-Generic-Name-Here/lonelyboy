@@ -8,7 +8,7 @@ import numpy as np
 from lonelyboy.geospatial.preprocessing import get_outliers
 
 
-def map_plot(df1, df2 = None, title=None, fontsize=25, color=['r', 'g'], figsize = (15,15), **kwargs):
+def map_plot(df1, df2 = None, title=None, fontsize=25, color=['r', 'g'], figsize = (15,15), attribution="", **kwargs):
 	'''
 	Plot one or two dataframes on top of eachother.
 
@@ -21,7 +21,7 @@ def map_plot(df1, df2 = None, title=None, fontsize=25, color=['r', 'g'], figsize
 	if df2 is not None:
 		df2.crs = {'init': 'epsg:4326'}
 		df2.to_crs(epsg=3857).plot(figsize=figsize,color=color[1], ax=ax, **kwargs)
-	ctx.add_basemap(ax)
+	ctx.add_basemap(ax, attribution=attribution)
 
 
 def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
