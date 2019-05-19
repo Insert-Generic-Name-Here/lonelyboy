@@ -546,21 +546,14 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 		if len(temporal_segmented_trajectories[idx]) == 0:
 			continue
 		# print (f'@Temporal-Segmentation BEFORE RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
-		print (temporal_segmented_trajectories[idx])
+		# print (temporal_segmented_trajectories[idx].ts.diff().values)
 		temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
-
 		# print (f'@Temporal-Segmentation AFTER RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
-		temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
+		# temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
 
-	# tmp = []
-	# for traj_id in segmented_trajectories.traj_id.unique():
-	# 	sub_traj = segmented_trajectories.loc[segmented_trajectories.traj_id == traj_id]
-	# 	tmp.append(resample_geospatial(sub_traj, rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat))
-	# vessel_fn = pd.concat((sub_traj for sub_traj in tmp), ignore_index=True)
 	# tmp = []
 	# for traj_id in vessel_fn.traj_id.unique():
 	# 	sub_traj = vessel_fn.loc[vessel_fn.traj_id == traj_id]
-	# 	sub_traj = calculate_velocity(sub_traj)
 	# 	# TODO: Adjust _segment_vessel function to make use of the status codes (as presented in thesis-tasks doc) as well as the sub_traj_id column
 	# 	# sub_traj_tagged = _segment_vessel(sub_traj.copy(), None, pois_alpha=pois_alpha, pois_window=pois_window, semantic=semantic)
 	# 	# sub_traj['sub_traj_id'] = sub_traj_tagged.traj_id.values
