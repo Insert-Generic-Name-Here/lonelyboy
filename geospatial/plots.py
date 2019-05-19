@@ -22,6 +22,8 @@ def map_plot(df1, df2 = None, title=None, fontsize=25, color=['r', 'g'], figsize
 		df2.crs = {'init': 'epsg:4326'}
 		df2.to_crs(epsg=3857).plot(figsize=figsize,color=color[1], ax=ax, **kwargs)
 	ctx.add_basemap(ax, attribution=attribution)
+	ax.margins(0)
+	ax.tick_params(left=False, labelleft=False, bottom=False, labelbottom=False)
 
 
 def plot_segments(gdf, feature='velocity', alpha=1.5, color='r'):
