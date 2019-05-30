@@ -1,11 +1,11 @@
 import os, sys
-sys.path.append(os.path.join(os.path.expanduser('~'), 'Documents/Insert-Generic-Name-Here/'))
+sys.path.append(os.path.join(os.path.expanduser('~')))
 # sys.path
 
-from lonelyboy.geospatial import plots as gsplt
-from lonelyboy.geospatial import preprocessing as gspp
-from lonelyboy.timeseries import lbtimeseries as tspp
-from lonelyboy.geospatial import group_patterns_v2 as gsgp
+import plots as gsplt
+import preprocessing as gspp
+import lbtimeseries as tspp
+import group_patterns_v2 as gsgp
 
 import psycopg2
 import numpy as np
@@ -29,19 +29,23 @@ from multiprocessing import cpu_count, Pool
 from functools import partial
 import datetime
 
-
-num_partitions=5
+#### PARAMS ####
+# gp_type = 'flocks'
+cardinality = 3
+dt = 3
+# distance = 2778
+num_partitions=4
+################
 
 properties = configparser.ConfigParser()
 properties.read(os.path.join('.','sql_server.ini'))
 properties = properties['SERVER']
 
-host    = properties['host']
+host    = '192.168.1.1'
 db_name = properties['db_name']
 uname   = properties['uname']
 pw      = properties['pw']
 port    = properties['port']
-print('loading data')
 
 # traj_sql = 'SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min '
 
@@ -52,68 +56,70 @@ print('loading data')
 
 
 
+for gp_type in ['flocks', 'convoys']:
+	for distance in [1852,2778,3704]:
+		if num_partitions!=1:
 
-if num_partitions!=1:
+			save_name = f'{gp_type}_card_{cardinality}_dt_{dt}_dist_{distance}.csv'
+			dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min '
 
-	save_name = f'tmptmp.csv'
-	dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1456802710 AND ts<1457575510'
+			con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
+			print('loading data')
 
-	con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
+			# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
+			datet = pd.read_sql_query(dt_sql,con=con)
+			total = datet.datetime.nunique()
 
-	# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
-	datet = pd.read_sql_query(dt_sql,con=con)
-	total = datet.datetime.nunique()
+			# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
+			# ports.geom = ports.geom.apply(lambda x: x[0])
 
-	# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
-	# ports.geom = ports.geom.apply(lambda x: x[0])
-
-	con.close()
-
-
-	parts = pd.cut(datet.datetime,num_partitions+1, retbins=True)[1]
-
-	print(f'No. of partitions -> {len(parts)-1}')
-	datet = None
-	for i in range(num_partitions):
-		if i ==0:
-			mined_patterns = None
-			start = 0
-			last_ts = None
-		traj_sql = f"SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'"
-
-		print(f'Loading Partition #{i+1}')
-		con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
-
-		# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
-		traj = pd.read_sql_query(traj_sql,con=con)
+			con.close()
 
 
-		# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
-		# ports.geom = ports.geom.apply(lambda x: x[0])
+			parts = pd.cut(datet.datetime,num_partitions+1, retbins=True)[1]
 
-		con.close()
+			print(f'No. of partitions -> {len(parts)-1}')
+			datet = None
+			for i in range(num_partitions):
+				if i ==0:
+					mined_patterns = None
+					start = 0
+					last_ts = None
+				traj_sql = f"SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'"
 
-		print(f'Starting Partition #{i+1} ---- {traj.datetime.max()}, {traj.datetime.min()}')
+				print(f'Loading Partition #{i+1}')
+				con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
 
-		mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = 'flocks', min_diameter=3000, min_cardinality=2, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns)
-
-	print('Saving Result...')
-	mined_patterns.to_csv(save_name, index=False)
+				# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
+				traj = pd.read_sql_query(traj_sql,con=con)
 
 
-else:
-	traj_sql = 'SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1456802710 AND ts<1457575510'
+				# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
+				# ports.geom = ports.geom.apply(lambda x: x[0])
 
-	con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
+				con.close()
 
-	# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
-	traj = pd.read_sql_query(traj_sql,con=con)
+				print(f'Starting Partition #{i+1} ---- {traj.datetime.max()}, {traj.datetime.min()}')
 
-	# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
-	# ports.geom = ports.geom.apply(lambda x: x[0])
+				mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = 'convoys', min_diameter=2778, min_cardinality=5, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns)
 
-	con.close()
+			print('Saving Result...')
+			mined_patterns.to_csv(save_name, index=False)
 
-	print('done, len -> ', len(traj))
 
-	gsgp.group_patterns(df = traj, mode = 'flocks', min_diameter=3000, min_cardinality=2, time_threshold=30, save_result=True)
+		else:
+			traj_sql = 'SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1456802710 AND ts<1457575510'
+
+			con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
+
+			# traj = gpd.GeoDataFrame.from_postgis(traj_sql, con)
+			traj = pd.read_sql_query(traj_sql,con=con)
+
+			# ports = gpd.GeoDataFrame.from_postgis(ports_sql, con, geom_col='geom' )
+			# ports.geom = ports.geom.apply(lambda x: x[0])
+
+			con.close()
+
+			print('done, len -> ', len(traj))
+
+			gsgp.group_patterns(df = traj, mode = 'flocks', min_diameter=3000, min_cardinality=2, time_threshold=30, save_result=True)

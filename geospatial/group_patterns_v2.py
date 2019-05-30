@@ -68,7 +68,7 @@ def find_existing_flocks(x, present, past, last_ts):
 	# find the indices of past Dataframe where current cluster is subset of flock
 	indcs = [set(x.clusters) < set(val) for val in past.loc[past.et==last_ts].clusters.values]
 	# get the indices of the past dataframe where that occurs
-	past.loc[(indcs)].index.tolist()
+	return past.loc[(indcs)].index.tolist()
 
 
 def replace_with_existing_flocks(x, present, to_keep, past):
