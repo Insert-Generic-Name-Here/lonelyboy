@@ -101,7 +101,7 @@ for gp_type in ['flocks', 'convoys']:
 
 				print(f'Starting Partition #{i+1} ---- {traj.datetime.max()}, {traj.datetime.min()}')
 
-				mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = 'convoys', min_diameter=2778, min_cardinality=5, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns)
+				mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns)
 
 			print('Saving Result...')
 			mined_patterns.to_csv(save_name, index=False)
