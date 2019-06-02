@@ -66,9 +66,25 @@ def find_existing_flocks(x, present, past, last_ts):
 	Find all clusters (present) that existed in the past (cluster subset of flock)
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
-	indcs = [set(x.clusters) < set(val) for val in past.loc[past.et==last_ts].clusters.values]
+	# This is not really necessary, but i am too scared to remove it ...
+	indcs = past.apply(lambda val: (val.et == last_ts) and set(x.clusters) < set(val.clusters), axis=1)  
+		#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
-	return past.loc[(indcs)].index.tolist()
+	if indcs.values.any():
+		#print(type(past[indcs].to_frame.st))
+		x.dur = past[indcs].dur.max()+1
+		x.st = past[indcs].st.min()
+		
+	return x
+		
+	#if not past.loc[(indcs)].empty:
+	#	print (f'{x.clusters} is a subset of {past.loc[(indcs)]}')
+	#	return
+	#print('PAST [BEFORE RETURN STATEMENT]: ', past.loc[(indcs)].index.values.tolist())
+	#return past.loc[(indcs)].index.values.tolist()	#OG
+	#existing_patterns = past.loc[(indcs)].index.values.tolist() # Added V2
+	#return existing_patterns if len(existing_patterns) != 0 else None # Added V2
+
 
 
 def replace_with_existing_flocks(x, present, to_keep, past):
@@ -76,11 +92,9 @@ def replace_with_existing_flocks(x, present, to_keep, past):
 	Replace current cluster with his existing flock
 	'''
 	if to_keep.iloc[x.name]:
-		if len(past.iloc[to_keep.iloc[x.name]])>1:
-			raise Exception('len > 1, something is wrong')
 
-		x.dur = past.iloc[to_keep.iloc[x.name]].dur.values[0] +1
-		x.st = past.iloc[to_keep.iloc[x.name]].st.values[0]
+		x.dur = past.iloc[to_keep.iloc[x.name]].dur.max()+1
+		x.st = past.iloc[to_keep.iloc[x.name]].st.min()
 	return x
 
 
@@ -98,9 +112,13 @@ def present_new_or_subset_of_past(present, past, last_ts):
 	'''
 	Find and treat current clusters that exist in the past as a subset of a flock (used when flocks break apart to many smaller ones).
 	'''
-	to_keep = present.apply(find_existing_flocks, args=(present,past,last_ts,) , axis=1)
-
-	present = present.apply(replace_with_existing_flocks, args=(present,to_keep,past,), axis=1)
+	#to_keep = present.apply(find_existing_flocks, args=(present,past,last_ts,) , axis=1)
+	
+	#if len(to_keep) != 0:
+	#	to_keep.to_csv('wtf.csv', header=None)
+	#	print(len(to_keep))
+	#	print('this should not be empty:', to_keep)
+	present = present.apply(find_existing_flocks, args=(present,past,last_ts,), axis=1)
 
 	new = present.merge(past,on='clusters', how='left',suffixes=['','tmp'], indicator=True)
 	new = new[new['_merge']=='left_only'].drop(['_merge'],axis=1).dropna(axis=1)
@@ -171,6 +189,9 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 
 
 def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
+	
+	closed_patterns = pd.DataFrame()
+
 	if not total:
 		total = df.datetime.nunique()
 
@@ -182,7 +203,10 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		if (not last_ts) and (not mined_patterns):
 			raise
 
-
+	#if mined patterns are not empty, split them to active (mined_patterns) and inactive (closed_patterns) 	
+	if mined_patterns is not None:
+		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=last_ts])
+		mined_patterns = mined_patterns.loc[mined_patterns.et==last_ts]
 
 
 	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
@@ -199,6 +223,8 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		elif mode == 'swarms' or mode == 's':
 			raise NotImplementedError('Current mode is not Implemented atm.')
 
+		
+		present = present.loc[present.clusters.apply(len)>=min_cardinality]
 		# Init the first present as mined_patterns
 		if ind == 0:
 			mined_patterns	= present
@@ -228,5 +254,29 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		# and
 		# 3. Num of vessels in flock >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
 		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.dur>time_threshold)) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
+		#Add all the inactive patterns to closed_patterns df
+		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=ts])
+		# jeep only the active dfs
+		mined_patterns = mined_patterns.loc[mined_patterns.et==ts]
 		last_ts = ts
-	return mined_patterns, ind+1, last_ts
+		if ind % 500 == 0:
+			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
+	
+
+	return pd.concat([mined_patterns,closed_patterns]), ind+1, last_ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

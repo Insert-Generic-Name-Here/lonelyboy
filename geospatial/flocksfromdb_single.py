@@ -4,7 +4,6 @@ sys.path.append(os.path.join(os.path.expanduser('~')))
 
 import plots as gsplt
 import preprocessing as gspp
-import lbtimeseries as tspp
 import group_patterns_v2 as gsgp
 
 import psycopg2
@@ -35,6 +34,7 @@ cardinality = 3
 dt = 3
 distance = 2778
 num_partitions=4
+print(f'Discovering {gp_type} with card={cardinality}, dt={dt} and distance={distance}')
 ################
 
 properties = configparser.ConfigParser()

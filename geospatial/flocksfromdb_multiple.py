@@ -4,7 +4,6 @@ sys.path.append(os.path.join(os.path.expanduser('~')))
 
 import plots as gsplt
 import preprocessing as gspp
-import lbtimeseries as tspp
 import group_patterns_v2 as gsgp
 
 import psycopg2
