@@ -66,8 +66,7 @@ def find_existing_flocks(x, present, past, last_ts):
 	Find all clusters (present) that existed in the past (cluster subset of flock)
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
-	# This is not really necessary, but i am too scared to remove it ...
-	indcs = past.apply(lambda val: (val.et == last_ts) and set(x.clusters) < set(val.clusters), axis=1)  
+	indcs = past.apply(lambda val: (val.et == last_ts) and set(x.clusters) <= set(val.clusters), axis=1)  
 		#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
 	if indcs.values.any():
@@ -120,10 +119,7 @@ def present_new_or_subset_of_past(present, past, last_ts):
 	#	print('this should not be empty:', to_keep)
 	present = present.apply(find_existing_flocks, args=(present,past,last_ts,), axis=1)
 
-	new = present.merge(past,on='clusters', how='left',suffixes=['','tmp'], indicator=True)
-	new = new[new['_merge']=='left_only'].drop(['_merge'],axis=1).dropna(axis=1)
-
-	return new
+	return present
 
 
 def past_is_subset_or_set_of_present(present, past, ts, last_ts):
@@ -133,10 +129,10 @@ def past_is_subset_or_set_of_present(present, past, ts, last_ts):
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
 	if past.empty:
 		return past
-	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) <= set(val) for val in present.clusters.values]) , axis=1)
+	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
 	past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
-	return past
+	return past[~past.clusters.isin(present.clusters)]
 
 
 def merge_pattern(new_clusters, clusters_to_keep):
@@ -237,15 +233,11 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 
 		if len(new_subsets)==0:
 			if len(old_subsets_or_sets)==0:
-				print('Shieeeet')
-				break
-			else:
-				mined_patterns = old_subsets_or_sets
-		else:
-			if len(old_subsets_or_sets)==0:
-				mined_patterns = new_subsets
-			else:
-				mined_patterns = merge_pattern(new_subsets, old_subsets_or_sets)
+				print(f'Shieeeet, len of pres is -> {len(present)} dt is -> {ts} ')
+
+		print ('New\n',new_subsets,'\n\n\n')
+		print('old',old_subsets_or_sets)
+		mined_patterns = merge_pattern(new_subsets, old_subsets_or_sets)
 
 		# Only keep the entries that are either:
 		# 1. Currently active -> (mined_patterns.et==ts)
@@ -256,10 +248,10 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.dur>time_threshold)) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
 		#Add all the inactive patterns to closed_patterns df
 		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=ts])
-		# jeep only the active dfs
+		# Keep only the active dfs
 		mined_patterns = mined_patterns.loc[mined_patterns.et==ts]
 		last_ts = ts
-		if ind % 500 == 0:
+		if ind % 1000 == 0:
 			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
 	
 
