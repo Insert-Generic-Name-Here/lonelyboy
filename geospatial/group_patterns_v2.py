@@ -142,7 +142,7 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
-def reduce_partitions(dfA, dfB):
+def _merge_partitions(dfA, dfB):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
 	
@@ -166,6 +166,16 @@ def reduce_partitions(dfA, dfB):
 	# 3. Num of vessels in group pattern >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
 	return pd.concat([closed_patterns_A, merge_pattern(new_subsets, old_subsets_or_sets),
 					closed_patterns_B])
+
+
+def reduce_partitions(dfs):
+	complete = pd.DataFrame()
+	for df in tqdm(dfs):
+		if complete.empty:
+			complete = complete.append(df)
+		else:
+			complete = _merge_partitions(complete, df)
+	return complete
 
 
 def check_for_checkpoint(df_checksum, params):
@@ -210,7 +220,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		mined_patterns.to_csv(save_name, index=False)
 
 
-def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=True, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
+def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
 	
 	closed_patterns = pd.DataFrame()
 
@@ -256,11 +266,6 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 
 		new_subsets 		= present_new_or_subset_of_past(present, mined_patterns, last_ts)
 		old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
-
-		if len(new_subsets)==0:
-			if len(old_subsets_or_sets)==0:
-				print(f'Shieeeet, len of pres is -> {len(present)} dt is -> {ts} ')
-
 
 		mined_patterns = merge_pattern(new_subsets, old_subsets_or_sets)
 

@@ -156,8 +156,11 @@ else:
 	pool.close()
 	pool.join()
     
-	with open('tmp.pkl', 'wb') as f:
-		pickle.dump(dfs, f)
+    print('Reducing...')
+	mined_patterns = gsgp.reduce_partitions(dfs)
+    
+	print('Saving Result...')
+	mined_patterns.to_csv(save_name, index=False)
 
 
 # 	mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt)
