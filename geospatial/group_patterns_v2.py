@@ -235,8 +235,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 			if len(old_subsets_or_sets)==0:
 				print(f'Shieeeet, len of pres is -> {len(present)} dt is -> {ts} ')
 
-		print ('New\n',new_subsets,'\n\n\n')
-		print('old',old_subsets_or_sets)
+
 		mined_patterns = merge_pattern(new_subsets, old_subsets_or_sets)
 
 		# Only keep the entries that are either:
