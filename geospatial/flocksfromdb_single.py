@@ -73,7 +73,7 @@ if num_partitions!=1:
 	con.close()
 
 
-	parts = pd.cut(datet.datetime,num_partitions+1, retbins=True)[1]
+	parts = pd.cut(datet.datetime,num_partitions, retbins=True)[1]
 
 	print(f'No. of partitions -> {len(parts)-1}')
 	datet = None

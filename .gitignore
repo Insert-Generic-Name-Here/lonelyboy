@@ -5,3 +5,5 @@ geospatial/__pycache__/*
 __pycache__/
 
 deprecated/
+
+.ipynb_checkpoints/
