@@ -142,6 +142,32 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
+def reduce_partitions(dfA, dfB):
+	present = dfB.copy()
+	mined_patterns = dfA.copy()
+	
+	last_ts = mined_patterns.et.max()
+	ts = present.et.max()
+		  
+	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_ts]
+	mined_patterns = mined_patterns.loc[mined_patterns.et == last_ts]
+	
+	closed_patterns_B = present.loc[present.st != last_ts]
+	present = present.loc[present.st == last_ts]
+	
+	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_ts)
+	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
+	
+	# Only keep the entries that are either:
+	# 1. Currently active -> (mined_patterns.et==ts)
+	# or,
+	# 2. Been active for more that time_threshold time steps -> (mined_patterns.dur>time_threshold).
+	# and
+	# 3. Num of vessels in group pattern >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
+	return pd.concat([closed_patterns_A, merge_pattern(new_subsets, old_subsets_or_sets),
+					closed_patterns_B])
+
+
 def check_for_checkpoint(df_checksum, params):
 	try:
 		ckpnt = io.load_pickle('gp_checkpoint.pckl')
