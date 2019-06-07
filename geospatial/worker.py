@@ -1,6 +1,7 @@
 import os, sys
 import json
 sys.path.append(os.path.join(os.path.expanduser('~')))
+import paramiko
 # sys.path
 
 import plots as gsplt
@@ -93,3 +94,13 @@ mined_patterns = gsgp.reduce_partitions(dfs)
 
 print('Saving Result...')
 mined_patterns.to_csv(save_name, index=False)
+
+host = '192.168.1.1'
+
+ssh = paramiko.SSHClient()
+ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+ssh.connect(host, username='user')
+print (f'[+] Success for host: {host}')
+ftp_client=ssh_client.open_sftp()
+ftp_client.put(save_name,'/home/user/distdata/')
+ftp_client.close()

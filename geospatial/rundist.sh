@@ -16,6 +16,7 @@ for ipadr in 192.168.1.{2..6}
 do
   echo $ipadr
   scp "info$i.json" $ipadr:/home/user/dist/lonelyboy/geospatial/info.json ;rm "info$i.json"
-  ssh $ipadr "cd /home/user/dist/lonelyboy/geospatial; bash worker.sh"
   ((i++))
 done
+
+python param.py
