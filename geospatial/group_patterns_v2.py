@@ -220,7 +220,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		mined_patterns.to_csv(save_name, index=False)
 
 
-def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
+def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None, disable_progress_bar=True):
 	
 	closed_patterns = pd.DataFrame()
 
@@ -241,7 +241,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		mined_patterns = mined_patterns.loc[mined_patterns.et==last_ts]
 
 
-	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
+	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start, disable=disable_progress_bar):
 
 		if checkpoints and start != ind and ind % checkpoint_interval == 0 :
 			ckpnt = {'checksum': df_checksum, 'params': params, 'current_ts': ts, 'last_ts': last_ts, 'patterns': mined_patterns, 'ind': ind}
@@ -281,7 +281,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		# Keep only the active dfs
 		mined_patterns = mined_patterns.loc[mined_patterns.et==ts]
 		last_ts = ts
-		if ind % 1000 == 0:
+		if ind % 100 == 0:
 			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
 	
 
