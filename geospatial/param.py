@@ -17,7 +17,6 @@ def connect_exec(command, host):
 
 		for line in iter(stdout.readline, ""):
 		    print(line, end="")
-		print(stderr.read())
 		stdout.channel.recv_exit_status()
 		# print(stderr.read())
 		# return stderr.read()

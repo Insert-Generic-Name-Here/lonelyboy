@@ -142,9 +142,14 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
-def _merge_partitions(dfA, dfB):
+def _merge_partitions(dfA, dfB, timestep='60s'):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
+    
+	present.et = present.et.apply(pd.to_datetime)
+	present.st = present.st.apply(pd.to_datetime)
+	mined_patterns.st = mined_patterns.st.apply(pd.to_datetime)
+	mined_patterns.et = mined_patterns.et.apply(pd.to_datetime)
 	
 	last_ts = mined_patterns.et.max()
 	ts = present.et.max()
@@ -152,8 +157,8 @@ def _merge_partitions(dfA, dfB):
 	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_ts]
 	mined_patterns = mined_patterns.loc[mined_patterns.et == last_ts]
 	
-	closed_patterns_B = present.loc[present.st != last_ts]
-	present = present.loc[present.st == last_ts]
+	closed_patterns_B = present.loc[present.st != last_ts + pd.Timedelta(timestep)]
+	present = present.loc[present.st == last_ts + pd.Timedelta(timestep)]
 	
 	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_ts)
 	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
@@ -168,14 +173,24 @@ def _merge_partitions(dfA, dfB):
 					closed_patterns_B])
 
 
-def reduce_partitions(dfs):
-	complete = pd.DataFrame()
-	for df in tqdm(dfs):
-		if complete.empty:
-			complete = complete.append(df)
-		else:
-			complete = _merge_partitions(complete, df)
+def reduce_partitions(dfs, timestep='60s'):
+	complete = dfs[pd.to_datetime([df.et.max() for df in dfs]).argmin()]
+	print(complete)
+	for i in range(len(dfs)-1):
+		nxt = np.where([pd.to_datetime(complete.et.max()) + pd.Timedelta(timestep) == pd.to_datetime(df.st.min()) for df in dfs])[0][0]
+		complete = _merge_partitions(complete, dfs[nxt])
 	return complete
+
+
+
+# def reduce_partitions(dfs):
+# 	complete = pd.DataFrame()
+# 	for df in tqdm(dfs):
+# 		if complete.empty:
+# 			complete = complete.append(df)
+# 		else:
+# 			complete = _merge_partitions(complete, df)
+# 	return complete
 
 
 def check_for_checkpoint(df_checksum, params):
