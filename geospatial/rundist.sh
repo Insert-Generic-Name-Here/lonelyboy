@@ -19,4 +19,6 @@ do
   ((i++))
 done
 
-python param.py
+python distribute.py
+
+python reduce.py
