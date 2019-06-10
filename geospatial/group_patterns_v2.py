@@ -66,23 +66,30 @@ def find_existing_flocks(x, present, past, last_ts):
 	Find all clusters (present) that existed in the past (cluster subset of flock)
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
-	indcs = past.apply(lambda val: (val.et == last_ts) and set(x.clusters) <= set(val.clusters), axis=1)  
+	indcs = past.apply(lambda val: (val.et == last_ts) and set(x.clusters) <= set(val.clusters), axis=1)
 		#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
 	if indcs.values.any():
 		#print(type(past[indcs].to_frame.st))
-		x.dur = past[indcs].dur.max()+1
+		x.dur += past[indcs].dur.max()
 		x.st = past[indcs].st.min()
-		
+
 	return x
-		
-	#if not past.loc[(indcs)].empty:
-	#	print (f'{x.clusters} is a subset of {past.loc[(indcs)]}')
-	#	return
-	#print('PAST [BEFORE RETURN STATEMENT]: ', past.loc[(indcs)].index.values.tolist())
-	#return past.loc[(indcs)].index.values.tolist()	#OG
-	#existing_patterns = past.loc[(indcs)].index.values.tolist() # Added V2
-	#return existing_patterns if len(existing_patterns) != 0 else None # Added V2
+
+def find_shrunked(x, present, past, current_ts):
+	'''
+	Find all clusters (present) that existed in the past (cluster subset of flock)
+	'''
+	# find the indices of past Dataframe where current cluster is subset of flock
+	indcs = present.apply(lambda val: (val.st == current_ts) and set(x.clusters) < set(val.clusters), axis=1)
+		#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
+	# get the indices of the past dataframe where that occurs
+	if indcs.values.any():
+		#print(type(past[indcs].to_frame.st))
+		x.dur += present[indcs].dur.max()
+		x.et = present[indcs].et.max()
+
+	return x
 
 
 
@@ -112,7 +119,7 @@ def present_new_or_subset_of_past(present, past, last_ts):
 	Find and treat current clusters that exist in the past as a subset of a flock (used when flocks break apart to many smaller ones).
 	'''
 	#to_keep = present.apply(find_existing_flocks, args=(present,past,last_ts,) , axis=1)
-	
+
 	#if len(to_keep) != 0:
 	#	to_keep.to_csv('wtf.csv', header=None)
 	#	print(len(to_keep))
@@ -122,20 +129,26 @@ def present_new_or_subset_of_past(present, past, last_ts):
 	return present
 
 
-def past_is_subset_or_set_of_present(present, past, ts, last_ts):
+def past_is_subset_or_set_of_present_old(present, past, ts, last_ts):
 	'''
 	Find and propagate a flock if it's subset of a current cluster.
 	'''
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
 	if past.empty:
 		return past
-	
+
     to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
-	
+
     #THIS IS SOOOO WRONG
     past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
 	return past[~past.clusters.isin(present.clusters)]
+
+def past_is_subset_or_set_of_present(present, past, ts):
+
+	past = past.apply(find_shrunked, args=(present,past,ts,), axis=1)
+
+	return past.loc[past.et == ts]
 
 
 def merge_pattern(new_clusters, clusters_to_keep):
@@ -148,25 +161,25 @@ def merge_pattern(new_clusters, clusters_to_keep):
 def _merge_partitions(dfA, dfB):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
-    
+
 	present.et = present.et.apply(pd.to_datetime)
 	present.st = present.st.apply(pd.to_datetime)
 	mined_patterns.st = mined_patterns.st.apply(pd.to_datetime)
 	mined_patterns.et = mined_patterns.et.apply(pd.to_datetime)
-	
+
 	last_et = mined_patterns.et.max()
-	current_st = present.st.min()  
+	current_st = present.st.min()
 	ts = present.et.max()
 
 	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_et]
 	mined_patterns = mined_patterns.loc[mined_patterns.et == last_et]
-	
+
 	closed_patterns_B = present.loc[present.st != current_st]
 	present = present.loc[present.st == current_st]
-	
+
 	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
 	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_et)
-	
+
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
 	# or,
@@ -180,11 +193,11 @@ def _merge_partitions(dfA, dfB):
 def reduce_partitions(dfs):
 	complete = dfs[pd.to_datetime([df.et.max() for df in dfs]).argmin()]
 	for i in range(len(dfs)-1):
-		
+
 		#THIS WHOLE THING IS NEEDED TO FIND THE MINIMUM POSITIVE NUMBER OF DIFFS !!!!!!
 		diffs = pd.Series([pd.to_datetime(df.st.min()) - pd.to_datetime(complete.et.max()) for df in dfs]).values.astype(float)
 		nxt = np.where(diffs<0, np.inf, diffs).argmin()
-		
+
 		complete = _merge_partitions(complete, dfs[nxt])
 	return complete
 
@@ -243,7 +256,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 
 
 def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None, disable_progress_bar=True):
-	
+
 	closed_patterns = pd.DataFrame()
 
 	if not total:
@@ -257,7 +270,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		if (not last_ts) and (not mined_patterns):
 			raise
 
-	#if mined patterns are not empty, split them to active (mined_patterns) and inactive (closed_patterns) 	
+	#if mined patterns are not empty, split them to active (mined_patterns) and inactive (closed_patterns)
 	if mined_patterns is not None:
 		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=last_ts])
 		mined_patterns = mined_patterns.loc[mined_patterns.et==last_ts]
@@ -277,7 +290,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		elif mode == 'swarms' or mode == 's':
 			raise NotImplementedError('Current mode is not Implemented atm.')
 
-		
+
 		present = present.loc[present.clusters.apply(len)>=min_cardinality]
 		# Init the first present as mined_patterns
 		if ind == 0:
@@ -305,22 +318,6 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		last_ts = ts
 		if ind % 100 == 0:
 			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
-	
+
 
 	return pd.concat([mined_patterns,closed_patterns]), ind+1, last_ts
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
