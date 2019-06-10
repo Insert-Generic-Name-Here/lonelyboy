@@ -440,7 +440,8 @@ def create_port_bounds(ports, epsg=2154, port_radius=2000):
 	return ports2
 
 
-def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154, cardinality_threshold=2):
+# def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154, cardinality_threshold=2):
+def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154):
 	'''
 	Segment trajectories based on port entrance/exit
 	'''
@@ -466,15 +467,15 @@ def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154, car
 	# if it's outside the port's radius and -1 if it's inside the port's radius. 
 	vessel.loc[vessel.index.isin(points_within_geometry.index), 'traj_id'] = -1
 	vessel.loc[vessel.index.isin(points_outside_geometry.index), 'traj_id'] = 0
-
+	vessel.loc[:,'label'] = vessel['traj_id'].values
+	
 	# we drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
 	vessel = vessel.loc[vessel.traj_id[vessel.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
 	vessel.reset_index(inplace=True, drop=True)
-
 	dfs = np.split(vessel, vessel.loc[vessel.traj_id == -1].index)
 	# dfs = [df for df in dfs if len(df) > 0]    # remove the fragments that are empty
 	# print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
-	dfs = [df for df in dfs if len(df) >= cardinality_threshold]    # remove the fragments that have at most 1 point
+	dfs = [df for df in dfs if len(df) != 0]    # remove the fragments that have at most 1 point
 	# print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
 	
 	if (len(dfs) == 0):
@@ -483,15 +484,22 @@ def segment_trajectories_v2(vessel, ports, port_radius=2000, port_epsg=2154, car
 
 	dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
 	# then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
-	for i in range(1,len(dfs)):
-		if (len(dfs[i]) == 1):
-			dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: dfs[i-1].traj_id.max())
-		else:
-			dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: x+dfs[i-1].traj_id.max()+1)				
+	# for i in range(1,len(dfs)):
+	# 	if (len(dfs[i]) == 1):
+	# 		dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: dfs[i-1].traj_id.max())
+	# 	else:
+	# 		dfs[i].loc[:,'traj_id'] = dfs[i].traj_id.apply(lambda x: x+dfs[i-1].traj_id.max()+1)				
+
+	for i in range(1,len(dfs)):        
+			if (len(dfs[i]) == 1):
+					dfs[i].loc[:,'traj_id'] = dfs[i-1].traj_id.max()
+			else:
+					dfs[i].loc[:,'traj_id'] = dfs[i-1].traj_id.max()+1
 
 	df_fn = pd.concat(dfs)
 	df_fn.sort_values('ts', inplace=True)
 	df_fn.reset_index(inplace=True, drop=True)
+
 	return df_fn
 
 
@@ -533,7 +541,7 @@ def __temporal_segment(vessel, temporal_threshold=12, cardinality_threshold=2):
 	return dfs_temporal
 
 
-def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, cardinality_threshold=2, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):                                               
+def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, cardinality_threshold=2, resample_trips=False, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):                                               
 	'''
 	After the Segmentation Stage, for each sub-trajectory:
 	  * we resample each trajectory
@@ -542,17 +550,19 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 		in order to add tags regarding the vessel's activity
 	'''
 	port_bounds = create_port_bounds(ports, epsg=port_epsg, port_radius=port_radius)
-	port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds, cardinality_threshold=cardinality_threshold)
+	# port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds, cardinality_threshold=cardinality_threshold)
+	port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds)
 	temporal_segmented_trajectories = __temporal_segment(port_segmented_trajectories, temporal_threshold=temporal_threshold, cardinality_threshold=cardinality_threshold)
 
-	for idx in range(0, len(temporal_segmented_trajectories)):
-		if len(temporal_segmented_trajectories[idx]) == 0:
-			continue
-		# print (f'@Temporal-Segmentation BEFORE RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
-		# print (temporal_segmented_trajectories[idx].ts.diff().values)
-		temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
-		# print (f'@Temporal-Segmentation AFTER RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
-		# temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
+	if (resample_trips):
+		for idx in range(0, len(temporal_segmented_trajectories)):
+			if len(temporal_segmented_trajectories[idx]) == 0:
+				continue
+			# print (f'@Temporal-Segmentation BEFORE RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
+			# print (temporal_segmented_trajectories[idx].ts.diff().values)
+			temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
+			# print (f'@Temporal-Segmentation AFTER RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
+			# temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
 
 	# tmp = []
 	# for traj_id in vessel_fn.traj_id.unique():

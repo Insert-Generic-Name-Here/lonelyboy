@@ -129,8 +129,11 @@ def past_is_subset_or_set_of_present(present, past, ts, last_ts):
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
 	if past.empty:
 		return past
-	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
-	past.loc[to_keep,'et'] = ts
+	
+    to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
+	
+    #THIS IS SOOOO WRONG
+    past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
 	return past[~past.clusters.isin(present.clusters)]
 
@@ -145,18 +148,24 @@ def merge_pattern(new_clusters, clusters_to_keep):
 def _merge_partitions(dfA, dfB):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
+    
+	present.et = present.et.apply(pd.to_datetime)
+	present.st = present.st.apply(pd.to_datetime)
+	mined_patterns.st = mined_patterns.st.apply(pd.to_datetime)
+	mined_patterns.et = mined_patterns.et.apply(pd.to_datetime)
 	
-	last_ts = mined_patterns.et.max()
+	last_et = mined_patterns.et.max()
+	current_st = present.st.min()  
 	ts = present.et.max()
-		  
-	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_ts]
-	mined_patterns = mined_patterns.loc[mined_patterns.et == last_ts]
+
+	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_et]
+	mined_patterns = mined_patterns.loc[mined_patterns.et == last_et]
 	
-	closed_patterns_B = present.loc[present.st != last_ts]
-	present = present.loc[present.st == last_ts]
+	closed_patterns_B = present.loc[present.st != current_st]
+	present = present.loc[present.st == current_st]
 	
-	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_ts)
-	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
+	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
+	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_et)
 	
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
@@ -169,13 +178,26 @@ def _merge_partitions(dfA, dfB):
 
 
 def reduce_partitions(dfs):
-	complete = pd.DataFrame()
-	for df in tqdm(dfs):
-		if complete.empty:
-			complete = complete.append(df)
-		else:
-			complete = _merge_partitions(complete, df)
+	complete = dfs[pd.to_datetime([df.et.max() for df in dfs]).argmin()]
+	for i in range(len(dfs)-1):
+		
+		#THIS WHOLE THING IS NEEDED TO FIND THE MINIMUM POSITIVE NUMBER OF DIFFS !!!!!!
+		diffs = pd.Series([pd.to_datetime(df.st.min()) - pd.to_datetime(complete.et.max()) for df in dfs]).values.astype(float)
+		nxt = np.where(diffs<0, np.inf, diffs).argmin()
+		
+		complete = _merge_partitions(complete, dfs[nxt])
 	return complete
+
+
+
+# def reduce_partitions(dfs):
+# 	complete = pd.DataFrame()
+# 	for df in tqdm(dfs):
+# 		if complete.empty:
+# 			complete = complete.append(df)
+# 		else:
+# 			complete = _merge_partitions(complete, df)
+# 	return complete
 
 
 def check_for_checkpoint(df_checksum, params):
@@ -220,7 +242,7 @@ def group_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_thresho
 		mined_patterns.to_csv(save_name, index=False)
 
 
-def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None):
+def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshold=30, checkpoints=False, checkpoints_freq=0.1, total=None, start=0, last_ts=None, mined_patterns=None, disable_progress_bar=True):
 	
 	closed_patterns = pd.DataFrame()
 
@@ -241,7 +263,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		mined_patterns = mined_patterns.loc[mined_patterns.et==last_ts]
 
 
-	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start):
+	for ind, (ts, sdf) in tqdm(enumerate(df.groupby('datetime'), start=start), total=total, initial=start, disable=disable_progress_bar):
 
 		if checkpoints and start != ind and ind % checkpoint_interval == 0 :
 			ckpnt = {'checksum': df_checksum, 'params': params, 'current_ts': ts, 'last_ts': last_ts, 'patterns': mined_patterns, 'ind': ind}
@@ -281,7 +303,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		# Keep only the active dfs
 		mined_patterns = mined_patterns.loc[mined_patterns.et==ts]
 		last_ts = ts
-		if ind % 1000 == 0:
+		if ind % 100 == 0:
 			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
 	
 

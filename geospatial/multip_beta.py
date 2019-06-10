@@ -39,8 +39,8 @@ def wpr(params, partitions):
 #### PARAMS ####
 gp_type = 'flocks'
 cardinality = 3
-dt = 3
-distance = 2778
+dt = 5
+distance = 1852
 num_partitions=1
 print(f'Discovering {gp_type} with card={cardinality}, dt={dt} and distance={distance}')
 ################
@@ -80,7 +80,6 @@ if num_partitions!=1:
 	# ports.geom = ports.geom.apply(lambda x: x[0])
 
 	con.close()
-
 
 	parts = pd.cut(datet.datetime,num_partitions, retbins=True)[1]
 
@@ -156,7 +155,7 @@ else:
 	pool.close()
 	pool.join()
     
-    print('Reducing...')
+	print('Reducing...')
 	mined_patterns = gsgp.reduce_partitions(dfs)
     
 	print('Saving Result...')
