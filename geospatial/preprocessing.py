@@ -7,12 +7,14 @@ import contextily as ctx
 from shapely.geometry import Point, LineString, shape
 from tqdm import tqdm
 import numpy as np
+from scipy.interpolate import interp1d
 from collections import Counter
 
 
+
 def read_csv_generator(file_path, chunksize=50000, sep=',', **kwargs):
-    pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
-    return pd_iter
+	pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
+	return pd_iter
 
 
 def gdf_from_df(df, crs=None):
@@ -47,45 +49,46 @@ def get_outliers(series, alpha = 3):
 	return series.loc[(series >q_high) | (series<q_low)].index , (q_low, q_high)
 
 
-def resample_geospatial(vessel, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):
-	'''
-	Resample and interpolate linearly a sample vessel.
-	'''
-	#convert unix to datetime
-	vessel['datetime'] = pd.to_datetime(vessel['ts'], unit='s')
-	#resample and interpolate using the method given. Linear is suggested
-	upsampled = vessel.resample(rule,on='datetime', loffset=True, kind='timestamp').first()
-	interpolated = upsampled.interpolate(method=method)
-	interpolated['real_point'] = interpolated.datetime.apply(lambda x: 1 if type(x)==pd._libs.tslibs.timestamps.Timestamp else 0)
-	#interpolate the geom column with the correct point objects using lat and lon
-	interpolated['geom'] = interpolated[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
-	# reset the index to normal and use the old index as new timestamp
-	interpolated['datetime'] = interpolated.index
-	interpolated.reset_index(drop=True, inplace=True)
+def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
+	df['datetime'] = pd.to_datetime(df['ts'], unit='s')
+	x = df['datetime'].values.astype(np.int64)
+	y = df[features].values
+
+	# scipy interpolate needs at least 2 records 
+	if (len(df) <= 1):
+		return df.iloc[0:0]
+		
+	f = interp1d(x, y, kind=method, axis=0)
+	xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
+	
+	df_RESAMPLED = pd.DataFrame(f(xnew_V2), columns=features)
+	df_RESAMPLED['datetime'] = pd.DataFrame(xnew_V2).reset_index(drop=True)
+	df_RESAMPLED['geom'] = df_RESAMPLED[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
+
 	#drop lat and lon if u like
 	if drop_lon_lat:
-		interpolated = interpolated.drop(['lat', 'lon'], axis=1)
-	return gpd.GeoDataFrame(interpolated, crs = crs, geometry='geom')
+		df_RESAMPLED = df_RESAMPLED.drop(['lat', 'lon'], axis=1)
+	return gpd.GeoDataFrame(df_RESAMPLED, crs=crs, geometry='geom')
 
 
 def calculate_angle(point1, point2):
-    '''
+	'''
 		Calculating initial bearing between two points
-    '''
-    lon1, lat1 = point1[0], point1[1]
-    lon2, lat2 = point2[0], point2[1]
+	'''
+	lon1, lat1 = point1[0], point1[1]
+	lon2, lat2 = point2[0], point2[1]
 
-    dlat = (lat2 - lat1)
-    dlon = (lon2 - lon1)
-    numerator = np.sin(dlon) * np.cos(lat2)
-    denominator = (
-        np.cos(lat1) * np.sin(lat2) -
-        (np.sin(lat1) * np.cos(lat2) * np.cos(dlon))
-    )
+	dlat = (lat2 - lat1)
+	dlon = (lon2 - lon1)
+	numerator = np.sin(dlon) * np.cos(lat2)
+	denominator = (
+		np.cos(lat1) * np.sin(lat2) -
+		(np.sin(lat1) * np.cos(lat2) * np.cos(dlon))
+	)
 
-    theta = np.arctan2(numerator, denominator)
-    theta_deg = (np.degrees(theta) + 360) % 360
-    return theta_deg
+	theta = np.arctan2(numerator, denominator)
+	theta_deg = (np.degrees(theta) + 360) % 360
+	return theta_deg
 
 
 def calculate_bearing(gdf):
@@ -413,7 +416,7 @@ def resample_and_segment(vessel, ports, pre_segment_threshold=12, velocity_drop_
 			return vessel, None
 		# apply pipeline to each segment and concatenate
 		dfs_prepd = [_pipeline_apply(df, ports, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers, pois_alpha, pois_window, semantic) for df in dfs if len(df)>1]
-        ####### exp #######
+		####### exp #######
 		for i in range(1,len(dfs_prepd)):
 			dfs_prepd[i].loc[:,'traj_id'] = dfs_prepd[i].traj_id.apply(lambda x: x+dfs_prepd[i-1].traj_id.max()+1)
 		df_fn = pd.concat(dfs_prepd)
@@ -522,7 +525,7 @@ def __temporal_segment(vessel, temporal_threshold=12, cardinality_threshold=2):
 	if (len(dfs_temporal) == 0):
 		# return [gpd.GeoDataFrame([], columns=['mmsi', 'speed', 'lon', 'lat', 'ts', 'geom', 'traj_id', 'traj_id_12h_gap'], geometry='geom', crs={'init':'epsg:4326'})]
 		return [vessel.iloc[0:0]]
-        
+		
 	dfs_temporal[0].loc[:,'traj_id_12h_gap'] = 0
 	for idx in range(1, len(dfs_temporal)):
 		dfs_temporal[idx].loc[:,'traj_id_12h_gap'] = dfs_temporal[idx].traj_id_12h_gap.apply(lambda x: x+dfs_temporal[idx-1].traj_id_12h_gap.max()+1)
@@ -536,7 +539,7 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 	  * we resample each trajectory
 	  * calculate the velocity (per-point)
 	  * we use our implementation on trajectory segmentation
-	    in order to add tags regarding the vessel's activity
+		in order to add tags regarding the vessel's activity
 	'''
 	port_bounds = create_port_bounds(ports, epsg=port_epsg, port_radius=port_radius)
 	port_segmented_trajectories = segment_trajectories_v2(vessel, port_bounds, cardinality_threshold=cardinality_threshold)
