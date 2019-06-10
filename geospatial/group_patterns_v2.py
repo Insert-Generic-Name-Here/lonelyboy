@@ -71,7 +71,6 @@ def find_existing_flocks(x, present, past, last_ts):
 	# get the indices of the past dataframe where that occurs
 	if indcs.values.any():
 		#print(type(past[indcs].to_frame.st))
-		x.dur += past[indcs].dur.max()
 		x.st = past[indcs].st.min()
 
 	return x
@@ -82,27 +81,13 @@ def find_shrunked(x, present, past, current_ts):
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
 	indcs = present.apply(lambda val: (val.st == current_ts) and set(x.clusters) < set(val.clusters), axis=1)
-		#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
+	#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
-	if indcs.values.any():
+	if indcs.values.any() and x.et != present[indcs].et.max():
 		#print(type(past[indcs].to_frame.st))
-		x.dur += present[indcs].dur.max()
 		x.et = present[indcs].et.max()
 
 	return x
-
-
-
-def replace_with_existing_flocks(x, present, to_keep, past):
-	'''
-	Replace current cluster with his existing flock
-	'''
-	if to_keep.iloc[x.name]:
-
-		x.dur = past.iloc[to_keep.iloc[x.name]].dur.max()+1
-		x.st = past.iloc[to_keep.iloc[x.name]].st.min()
-	return x
-
 
 def get_current_clusters(sdf, ts, diam=1000, circular=True):
 	'''
@@ -110,7 +95,6 @@ def get_current_clusters(sdf, ts, diam=1000, circular=True):
 	'''
 	present = pd.DataFrame([[tuple(val)] for (val) in translate(get_clusters(sdf, diam, circular=circular), sdf )], columns=['clusters'])
 	present['st'] = present['et'] = ts
-	present['dur'] = 1
 	return present
 
 
@@ -128,27 +112,11 @@ def present_new_or_subset_of_past(present, past, last_ts):
 
 	return present
 
-
-def past_is_subset_or_set_of_present_old(present, past, ts, last_ts):
-	'''
-	Find and propagate a flock if it's subset of a current cluster.
-	'''
-	# get if tuple of tmp1 is subset or equal of a row of tmp2
-	if past.empty:
-		return past
-
-    to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
-
-    #THIS IS SOOOO WRONG
-    past.loc[to_keep,'et'] = ts
-	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
-	return past[~past.clusters.isin(present.clusters)]
-
 def past_is_subset_or_set_of_present(present, past, ts):
 
 	past = past.apply(find_shrunked, args=(present,past,ts,), axis=1)
 
-	return past.loc[past.et == ts]
+	return past[~past.clusters.isin(present.clusters)]
 
 
 def merge_pattern(new_clusters, clusters_to_keep):
@@ -178,7 +146,7 @@ def _merge_partitions(dfA, dfB):
 	present = present.loc[present.st == current_st]
 
 	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
-	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_et)
+	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts)
 
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
@@ -300,7 +268,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 
 
 		new_subsets 		= present_new_or_subset_of_past(present, mined_patterns, last_ts)
-		old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
+		old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts)
 
 		mined_patterns = merge_pattern(new_subsets, old_subsets_or_sets)
 
@@ -310,7 +278,7 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		# 2. Been active for more that time_threshold time steps -> (mined_patterns.dur>time_threshold).
 		# and
 		# 3. Num of vessels in flock >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
-		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.dur>time_threshold)) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
+		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.et - mined_patterns.st > datetime.timedelta(minutes=time_threshold))) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
 		#Add all the inactive patterns to closed_patterns df
 		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=ts])
 		# Keep only the active dfs
