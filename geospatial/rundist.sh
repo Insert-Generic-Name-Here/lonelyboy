@@ -2,6 +2,7 @@
 
 #send current lb version to all workers
 
+mkdir /home/user/distdata
 for ipadr in 192.168.1.{2..6}
 do
   scp -r ../../lonelyboy $ipadr:/home/user/dist/
@@ -19,6 +20,8 @@ do
   ((i++))
 done
 
-python distribute.py
+#python distribute.py
 
-python reduce.py
+#python reduce.py
+
+#rm -rf /home/user/distdata

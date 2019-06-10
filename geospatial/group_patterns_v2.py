@@ -129,8 +129,11 @@ def past_is_subset_or_set_of_present(present, past, ts, last_ts):
 	# get if tuple of tmp1 is subset or equal of a row of tmp2
 	if past.empty:
 		return past
-	to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
-	past.loc[to_keep,'et'] = ts
+	
+    to_keep = past.apply(lambda x: (x.et == last_ts) and (True in [set(x.clusters) < set(val) for val in present.clusters.values]) , axis=1)
+	
+    #THIS IS SOOOO WRONG
+    past.loc[to_keep,'et'] = ts
 	past.loc[to_keep,'dur']= past.loc[to_keep].dur.apply(lambda x : x+1)
 	return past[~past.clusters.isin(present.clusters)]
 
@@ -142,7 +145,7 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
-def _merge_partitions(dfA, dfB, timestep='60s'):
+def _merge_partitions(dfA, dfB):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
     
@@ -151,17 +154,18 @@ def _merge_partitions(dfA, dfB, timestep='60s'):
 	mined_patterns.st = mined_patterns.st.apply(pd.to_datetime)
 	mined_patterns.et = mined_patterns.et.apply(pd.to_datetime)
 	
-	last_ts = mined_patterns.et.max()
+	last_et = mined_patterns.et.max()
+	current_st = present.st.min()  
 	ts = present.et.max()
-		  
-	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_ts]
-	mined_patterns = mined_patterns.loc[mined_patterns.et == last_ts]
+
+	closed_patterns_A = mined_patterns.loc[mined_patterns.et != last_et]
+	mined_patterns = mined_patterns.loc[mined_patterns.et == last_et]
 	
-	closed_patterns_B = present.loc[present.st != last_ts + pd.Timedelta(timestep)]
-	present = present.loc[present.st == last_ts + pd.Timedelta(timestep)]
+	closed_patterns_B = present.loc[present.st != current_st]
+	present = present.loc[present.st == current_st]
 	
-	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_ts)
-	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_ts)
+	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
+	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts, last_et)
 	
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
@@ -173,11 +177,14 @@ def _merge_partitions(dfA, dfB, timestep='60s'):
 					closed_patterns_B])
 
 
-def reduce_partitions(dfs, timestep='60s'):
+def reduce_partitions(dfs):
 	complete = dfs[pd.to_datetime([df.et.max() for df in dfs]).argmin()]
-	print(complete)
 	for i in range(len(dfs)-1):
-		nxt = np.where([pd.to_datetime(complete.et.max()) + pd.Timedelta(timestep) == pd.to_datetime(df.st.min()) for df in dfs])[0][0]
+		
+		#THIS WHOLE THING IS NEEDED TO FIND THE MINIMUM POSITIVE NUMBER OF DIFFS !!!!!!
+		diffs = pd.Series([pd.to_datetime(df.st.min()) - pd.to_datetime(complete.et.max()) for df in dfs]).values.astype(float)
+		nxt = np.where(diffs<0, np.inf, diffs).argmin()
+		
 		complete = _merge_partitions(complete, dfs[nxt])
 	return complete
 

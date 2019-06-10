@@ -95,6 +95,9 @@ mined_patterns = gsgp.reduce_partitions(dfs)
 print('Saving Result...')
 mined_patterns.to_csv(save_name, index=False)
 
+with open(f'pckl{slave_no}.pkl', 'wb') as f:
+	pickle.dump(dfs, f)
+
 host = '192.168.1.1'
 
 ssh = paramiko.SSHClient()

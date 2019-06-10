@@ -30,10 +30,10 @@ import datetime
 
 #### PARAMS ####
 gp_type = 'flocks'
-cardinality = 3
-dt = 3
+cardinality = 5
+dt = 10
 distance = 2778
-num_partitions=4
+num_partitions=1
 print(f'Discovering {gp_type} with card={cardinality}, dt={dt} and distance={distance}')
 ################
 
@@ -58,7 +58,7 @@ port    = properties['port']
 if num_partitions!=1:
 
 	save_name = f'{gp_type}_card_{cardinality}_dt_{dt}_dist_{distance}.csv'
-	dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min '
+	dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1444044420 AND ts<1444444020'
 
 	con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
 	print('loading data')
@@ -98,14 +98,14 @@ if num_partitions!=1:
 
 		print(f'Starting Partition #{i+1} ---- {traj.datetime.max()}, {traj.datetime.min()}')
 
-		mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns)
+		mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns, disable_progress_bar=False)
 
 	print('Saving Result...')
 	mined_patterns.to_csv(save_name, index=False)
 
 
 else:
-	traj_sql = 'SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1456802710 AND ts<1457575510'
+	traj_sql = 'SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1444044420 AND ts<1444444020'
 
 	con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
 
@@ -119,4 +119,7 @@ else:
 
 	print('done, len -> ', len(traj))
 
-	gsgp.group_patterns(df = traj, mode = 'flocks', min_diameter=3000, min_cardinality=2, time_threshold=30, save_result=True)
+	mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, checkpoints=False, checkpoints_freq=0.1, disable_progress_bar=False)
+    
+	print('Saving Result...')
+	mined_patterns.to_csv('tmp2c.csv', index=False)

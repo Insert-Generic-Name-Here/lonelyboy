@@ -9,9 +9,9 @@ import configparser
 #### PARAMS ####
 params = {
 	'gp_type' : 'flocks',
-	'cardinality' : 3,
-	'dt' : 5,
-	'distance' : 1852
+	'cardinality' : 5,
+	'dt' : 10,
+	'distance' : 2778
 }
 num_of_slaves = 5
 # num_of_slaves = int(sys.argv[1])
@@ -45,6 +45,7 @@ total = datet.datetime.nunique()
 con.close()
 json_list = [params for _ in range(num_of_slaves)]
 parts = pd.cut(datet.datetime, num_of_slaves, retbins=True)[1]
+# print(parts)
 
 for i in range(len(parts)-1):
 	json_list[i]['sql'] = (f"SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'")
