@@ -80,13 +80,18 @@ def find_shrunked(x, present, past, current_ts):
 	Find all clusters (present) that existed in the past (cluster subset of flock)
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
+	print('#######')
+	print(current_ts)
+	print(x.clusters)
 	indcs = present.apply(lambda val: (val.st == current_ts) and set(x.clusters) < set(val.clusters), axis=1)
 	#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
-	if indcs.values.any() and x.et != present[indcs].et.max():
+	if indcs.values.any():
+		print('got in')
 		#print(type(past[indcs].to_frame.st))
 		x.et = present[indcs].et.max()
-
+	print('#######')
+	
 	return x
 
 def get_current_clusters(sdf, ts, diam=1000, circular=True):
@@ -146,8 +151,10 @@ def _merge_partitions(dfA, dfB):
 	present = present.loc[present.st == current_st]
 
 	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
-	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, ts)
-
+	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, current_st)
+    
+	print(new_subsets)
+	print(old_subsets_or_sets)
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
 	# or,
