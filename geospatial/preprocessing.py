@@ -50,25 +50,30 @@ def get_outliers(series, alpha = 3):
 
 
 def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
-	df['datetime'] = pd.to_datetime(df['ts'], unit='s')
-	x = df['datetime'].values.astype(np.int64)
-	y = df[features].values
+    df['datetime'] = pd.to_datetime(df['ts'], unit='s')
+    x = df['datetime'].values.astype(np.int64)
+    y = df[features].values
+    
+    # scipy interpolate needs at least 2 records 
+    if (len(df) <= 1):
+        return df.iloc[0:0]
+    
+    f = interp1d(x, y, kind=method, axis=0)
+    xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
+    
+    df_RESAMPLED = pd.DataFrame(f(xnew_V2), columns=features)      
+    df_RESAMPLED.loc[:, 'datetime'] = xnew_V2
+    
+    if (len(df_RESAMPLED) == 0):
+        df_RESAMPLED.insert(len(df_RESAMPLED.columns), 'geom', '')
+    else:
+        df_RESAMPLED.loc[:, 'geom'] = df_RESAMPLED[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
 
-	# scipy interpolate needs at least 2 records 
-	if (len(df) <= 1):
-		return df.iloc[0:0]
-		
-	f = interp1d(x, y, kind=method, axis=0)
-	xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
-	
-	df_RESAMPLED = pd.DataFrame(f(xnew_V2), columns=features)
-	df_RESAMPLED['datetime'] = pd.DataFrame(xnew_V2).reset_index(drop=True)
-	df_RESAMPLED['geom'] = df_RESAMPLED[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
-
-	#drop lat and lon if u like
-	if drop_lon_lat:
-		df_RESAMPLED = df_RESAMPLED.drop(['lat', 'lon'], axis=1)
-	return gpd.GeoDataFrame(df_RESAMPLED, crs=crs, geometry='geom')
+    #drop lat and lon if u like
+    if drop_lon_lat:
+        df_RESAMPLED = df_RESAMPLED.drop(['lat', 'lon'], axis=1)
+        
+    return gpd.GeoDataFrame(df_RESAMPLED, crs=crs, geometry='geom')
 
 
 def calculate_angle(point1, point2):
