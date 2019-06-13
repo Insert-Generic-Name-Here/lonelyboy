@@ -1,6 +1,6 @@
 import os, sys
 import json
-sys.path.append(os.path.join(os.path.expanduser('~')))
+sys.path.append(os.path.join(os.path.expanduser('~'), 'dist'))
 import paramiko
 # sys.path
 
@@ -47,6 +47,7 @@ gp_type = json_file['gp_type']
 cardinality = json_file['cardinality']
 dt = json_file['dt']
 distance = json_file['distance']
+res_rate = json_file['res_rate']
 print(f'Slave{slave_no} -> Discovering {gp_type} with card={cardinality}, dt={dt} and distance={distance}')
 ################
 
@@ -77,9 +78,8 @@ traj = pd.read_sql_query(traj_sql,con=con)
 # ports.geom = ports.geom.apply(lambda x: x[0])
 
 con.close()
-print('done, len -> ', len(traj))
 
-print('starting..')
+print(f'Slave {slave_no}: Starting..')
 
 # 	partitions = [grp[1] for grp in traj.groupby(['datetime'])]
 partitions = [grp[1] for grp in traj.groupby(pd.cut(traj.datetime,cpu_count()))] # no of cores
@@ -89,21 +89,21 @@ dfs = pool.map(partial(wpr, params), partitions)
 pool.close()
 pool.join()
 
-print('Reducing...')
-mined_patterns = gsgp.reduce_partitions(dfs)
+print(f'Slave {slave_no}: Reducing...')
+mined_patterns = gsgp.reduce_partitions(dfs, dt, res_rate)
 
-print('Saving Result...')
+print(f'Slave {slave_no}: Saving Result...')
 mined_patterns.to_csv(save_name, index=False)
 
-with open(f'pckl{slave_no}.pkl', 'wb') as f:
-	pickle.dump(dfs, f)
+#with open(f'pckl{slave_no}.pkl', 'wb') as f:
+#	pickle.dump(dfs, f)
 
 host = '192.168.1.1'
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 ssh.connect(host, username='user')
-print (f'[+] Success for host: {host}')
+print (f'[+] Success for Slave {slave_no}')
 ftp_client=ssh.open_sftp()
 ftp_client.put(save_name,f'/home/user/distdata/{save_name}')
 ftp_client.close()

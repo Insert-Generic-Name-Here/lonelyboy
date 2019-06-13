@@ -80,17 +80,12 @@ def find_shrunked(x, present, past, current_ts):
 	Find all clusters (present) that existed in the past (cluster subset of flock)
 	'''
 	# find the indices of past Dataframe where current cluster is subset of flock
-	print('#######')
-	print(current_ts)
-	print(x.clusters)
 	indcs = present.apply(lambda val: (val.st == current_ts) and set(x.clusters) < set(val.clusters), axis=1)
 	#indcs = [set(x.clusters) < set(val.clusters.values) and (val.et==last_ts) for val in past]
 	# get the indices of the past dataframe where that occurs
 	if indcs.values.any():
-		print('got in')
 		#print(type(past[indcs].to_frame.st))
 		x.et = present[indcs].et.max()
-	print('#######')
 	
 	return x
 
@@ -131,7 +126,7 @@ def merge_pattern(new_clusters, clusters_to_keep):
 	return pd.concat([new_clusters,clusters_to_keep]).reset_index(drop=True)
 
 
-def _merge_partitions(dfA, dfB):
+def _merge_partitions(dfA, dfB, time_threshold):
 	present = dfB.copy()
 	mined_patterns = dfA.copy()
 
@@ -153,19 +148,18 @@ def _merge_partitions(dfA, dfB):
 	new_subsets = present_new_or_subset_of_past(present, mined_patterns, last_et)
 	old_subsets_or_sets = past_is_subset_or_set_of_present(present, mined_patterns, current_st)
     
-	print(new_subsets)
-	print(old_subsets_or_sets)
 	# Only keep the entries that are either:
 	# 1. Currently active -> (mined_patterns.et==ts)
 	# or,
 	# 2. Been active for more that time_threshold time steps -> (mined_patterns.dur>time_threshold).
 	# and
 	# 3. Num of vessels in group pattern >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
-	return pd.concat([closed_patterns_A, merge_pattern(new_subsets, old_subsets_or_sets),
+	final_patterns = merge_pattern(new_subsets, old_subsets_or_sets) 
+	return pd.concat([closed_patterns_A, final_patterns.loc[(final_patterns.et - final_patterns.st >= datetime.timedelta(minutes=time_threshold))],
 					closed_patterns_B])
 
 
-def reduce_partitions(dfs):
+def reduce_partitions(dfs, time_threshold, res_rate):	
 	complete = dfs[pd.to_datetime([df.et.max() for df in dfs]).argmin()]
 	for i in range(len(dfs)-1):
 
@@ -173,7 +167,10 @@ def reduce_partitions(dfs):
 		diffs = pd.Series([pd.to_datetime(df.st.min()) - pd.to_datetime(complete.et.max()) for df in dfs]).values.astype(float)
 		nxt = np.where(diffs<0, np.inf, diffs).argmin()
 
-		complete = _merge_partitions(complete, dfs[nxt])
+		if dfs[nxt].st.min() - complete.et.max() == pd.Timedelta(res_rate):
+			complete = _merge_partitions(complete, dfs[nxt], time_threshold)
+		else:
+			complete = complete.append(dfs[nxt], ignore_index=True)
 	return complete
 
 
@@ -285,14 +282,14 @@ def mine_patterns(df, mode, min_diameter=3704, min_cardinality=10, time_threshol
 		# 2. Been active for more that time_threshold time steps -> (mined_patterns.dur>time_threshold).
 		# and
 		# 3. Num of vessels in flock >= min_cardinality -> ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])
-		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.et - mined_patterns.st > datetime.timedelta(minutes=time_threshold))) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
+		mined_patterns = mined_patterns.loc[((mined_patterns.et==ts) | (mined_patterns.et - mined_patterns.st >= datetime.timedelta(minutes=time_threshold))) & ([len(clst)>=min_cardinality for clst in mined_patterns.clusters])]
 		#Add all the inactive patterns to closed_patterns df
 		closed_patterns = closed_patterns.append(mined_patterns.loc[mined_patterns.et!=ts])
 		# Keep only the active dfs
 		mined_patterns = mined_patterns.loc[mined_patterns.et==ts]
 		last_ts = ts
-		if ind % 100 == 0:
-			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
+#		if ind % 100 == 0:
+#			print(f'Mined size -> {len(mined_patterns)}, Hist size -> {len(closed_patterns)}')
 
 
 	return pd.concat([mined_patterns,closed_patterns]), ind+1, last_ts

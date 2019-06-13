@@ -20,8 +20,10 @@ do
   ((i++))
 done
 
-#python distribute.py
+python distribute.py
 
-#python reduce.py
+python reduce.py
 
-#rm -rf /home/user/distdata
+rm -rf /home/user/distdata
+
+rm 'info_master.json'

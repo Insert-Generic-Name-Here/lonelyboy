@@ -11,8 +11,13 @@ params = {
 	'gp_type' : 'flocks',
 	'cardinality' : 5,
 	'dt' : 10,
-	'distance' : 2778
+	'distance' : 2778,
+	'res_rate' : '60S'
 }
+
+with open(f'info_master.json', 'w') as f:
+	json.dump(params, f)
+
 num_of_slaves = 5
 # num_of_slaves = int(sys.argv[1])
 
