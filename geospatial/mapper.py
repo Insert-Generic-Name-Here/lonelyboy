@@ -8,10 +8,10 @@ import configparser
 
 #### PARAMS ####
 params = {
-	'gp_type' : 'flocks',
-	'cardinality' : 5,
-	'dt' : 10,
-	'distance' : 2778,
+	'gp_type' : 'convoys',
+	'cardinality' : 9,
+	'dt' : 30,
+	'distance' : 926,
 	'res_rate' : '60S'
 }
 
@@ -35,7 +35,7 @@ uname   = properties['uname']
 pw      = properties['pw']
 port    = properties['port']
 
-dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min '
+dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_min_trip_card_3_segmented_12h_resampled_1min_v2'
 
 con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
 print('loading data')
@@ -53,7 +53,7 @@ parts = pd.cut(datet.datetime, num_of_slaves, retbins=True)[1]
 # print(parts)
 
 for i in range(len(parts)-1):
-	json_list[i]['sql'] = (f"SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'")
+	json_list[i]['sql'] = (f"SELECT * FROM ais_data.dynamic_ships_min_trip_card_3_segmented_12h_resampled_1min_v2 WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'")
 	json_list[i]['slave_no'] = i+1
 	with open(f'info{i}.json', 'w') as f:
 		json.dump(json_list[i], f)

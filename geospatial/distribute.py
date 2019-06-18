@@ -26,7 +26,7 @@ def connect_exec(command, host):
 
 
 #command='date'
-command = 'cd /home/user/dist/lonelyboy/geospatial; /home/user/anaconda3/envs/gs_beta/bin/python worker.py'
+command = 'cd /home/user/dist/lonelyboy/geospatial; /home/user/anaconda3/envs/gs_beta/bin/python worker2.py'
 slaves = ['192.168.1.2', '192.168.1.3', '192.168.1.4', '192.168.1.5', '192.168.1.6']
 
 pool = Pool(len(slaves))

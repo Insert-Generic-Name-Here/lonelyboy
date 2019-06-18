@@ -4,7 +4,7 @@ sys.path.append(os.path.join(os.path.expanduser('~')))
 
 import plots as gsplt
 import preprocessing as gspp
-import group_patterns_v2 as gsgp
+import group_patterns_v3 as lbgp
 
 import psycopg2
 import numpy as np
@@ -31,9 +31,9 @@ import datetime
 #### PARAMS ####
 gp_type = 'flocks'
 cardinality = 5
-dt = 10
-distance = 2778
-num_partitions=1
+dt = 20
+distance = 926
+num_partitions=3
 print(f'Discovering {gp_type} with card={cardinality}, dt={dt} and distance={distance}')
 ################
 
@@ -41,7 +41,7 @@ properties = configparser.ConfigParser()
 properties.read(os.path.join('.','sql_server.ini'))
 properties = properties['SERVER']
 
-host    = '192.168.1.1'
+host    = 'localhost'
 db_name = properties['db_name']
 uname   = properties['uname']
 pw      = properties['pw']
@@ -58,7 +58,7 @@ port    = properties['port']
 if num_partitions!=1:
 
 	save_name = f'{gp_type}_card_{cardinality}_dt_{dt}_dist_{distance}.csv'
-	dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE ts>1444044420 AND ts<1444444020'
+	dt_sql = 'SELECT datetime FROM ais_data.dynamic_ships_min_trip_card_3_segmented_12h_resampled_1min_v2'
 
 	con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
 	print('loading data')
@@ -79,10 +79,10 @@ if num_partitions!=1:
 	datet = None
 	for i in range(num_partitions):
 		if i ==0:
-			mined_patterns = None
+			active = pd.DataFrame()
+			closed_patterns = pd.DataFrame()
 			start = 0
-			last_ts = None
-		traj_sql = f"SELECT * FROM ais_data.dynamic_ships_segmented_12h_resampled_1min WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'"
+		traj_sql = f"SELECT * FROM ais_data.dynamic_ships_min_trip_card_3_segmented_12h_resampled_1min_v2 WHERE datetime>'{str(parts[i])}' AND datetime<='{str(parts[i+1])}'"
 
 		print(f'Loading Partition #{i+1}')
 		con = psycopg2.connect(database=db_name, user=uname, password=pw, host=host, port = port)
@@ -97,12 +97,11 @@ if num_partitions!=1:
 		con.close()
 
 		print(f'Starting Partition #{i+1} ---- {traj.datetime.max()}, {traj.datetime.min()}')
-
-		mined_patterns, start, last_ts = gsgp.mine_patterns(df = traj, mode = gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, checkpoints=False, checkpoints_freq=0.1, total=total, start=start, last_ts=last_ts, mined_patterns=mined_patterns, disable_progress_bar=False, keep_starting=False)
+		
+		active, closed_patterns, start = lbgp.mine_patterns(traj, gp_type, min_diameter=distance, min_cardinality=cardinality, time_threshold=dt, active=active, closed_patterns=closed_patterns, total=total, start=start, disable_progress_bar=False)
 
 	print('Saving Result...')
-	
-	mined_patterns.to_csv(save_name, index=False)
+	pd.concat([closed_patterns, active]).to_csv(save_name, index=False)
 
 
 else:
