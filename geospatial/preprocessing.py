@@ -49,7 +49,8 @@ def get_outliers(series, alpha = 3):
 	return series.loc[(series >q_high) | (series<q_low)].index , (q_low, q_high)
 
 
-def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
+# def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
+def resample_geospatial(df, features=['lat', 'lon'], rate=1, method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
     df['datetime'] = pd.to_datetime(df['ts'], unit='s')
     x = df['datetime'].values.astype(np.int64)
     y = df[features].values
@@ -58,11 +59,16 @@ def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear'
     if (len(df) <= 1):
         return df.iloc[0:0]
     
-    f = interp1d(x, y, kind=method, axis=0)
-    xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
+    dt_start = df['datetime'].min().replace(second=0)
+    dt_end = df['datetime'].max().replace(second=0)
     
-    df_RESAMPLED = pd.DataFrame(f(xnew_V2), columns=features)      
-    df_RESAMPLED.loc[:, 'datetime'] = xnew_V2
+    f = interp1d(x, y, kind=method, axis=0)
+	# xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
+    xnew_V3 = pd.date_range(start=dt_start.replace(minute=rate*(dt_start.minute//rate)), end=dt_end, freq=f'{rate*60}S', closed='right') 
+   
+    
+    df_RESAMPLED = pd.DataFrame(f(xnew_V3), columns=features)      
+    df_RESAMPLED.loc[:, 'datetime'] = xnew_V3
     
     if (len(df_RESAMPLED) == 0):
         df_RESAMPLED.insert(len(df_RESAMPLED.columns), 'geom', '')
