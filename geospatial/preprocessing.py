@@ -35,6 +35,8 @@ def gdf_from_df(df, crs=None):
 	# {'init':'epsg:4326'}
 	df['geom'] = np.nan
 	df.geom = df[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
+	df['merc_x'] = np.nan
+	df['merc_y'] = np.nan
 	df['merc_x'] = df[['lat','lon']].apply(lambda x: merc(x)[0],axis=1)
 	df['merc_y'] = df[['lat','lon']].apply(lambda x: merc(x)[1],axis=1)
 	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
