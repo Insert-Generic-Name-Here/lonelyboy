@@ -16,11 +16,26 @@ def read_csv_generator(file_path, chunksize=50000, sep=',', **kwargs):
 	pd_iter = pd.read_csv(file_path, chunksize=chunksize, sep=sep, **kwargs)
 	return pd_iter
 
+def merc(Coordinates):
+	'''
+	Transforms Coordinates (lat,lon) to mercator. Usefull for bokeh plotting
+	''' 
+	lat = Coordinates[0]
+	lon = Coordinates[1]
+
+	r_major = 6378137.000
+	x = r_major * math.radians(lon)
+	scale = x/lon
+	y = 180.0/math.pi * math.log(math.tan(math.pi/4.0 + lat * (math.pi/180.0)/2.0)) * scale    
+	return (x, y)
+
 
 def gdf_from_df(df, crs=None):
 	# {'init':'epsg:4326'}
 	df['geom'] = np.nan
 	df.geom = df[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
+	df['merc_x'] = df[['lat','lon']].apply(lambda x: merc(x)[0],axis=1)
+	df['merc_y'] = df[['lat','lon']].apply(lambda x: merc(x)[1],axis=1)
 	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
 
 
