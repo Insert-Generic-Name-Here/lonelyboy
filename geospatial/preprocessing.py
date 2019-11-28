@@ -33,12 +33,12 @@ def merc(Coordinates):
 
 def gdf_from_df(df, crs=None):
 	# {'init':'epsg:4326'}
-	df['geom'] = np.nan
+	df.loc[:, 'geom'] = np.nan
 	df.geom = df[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
-	df['merc_x'] = np.nan
-	df['merc_y'] = np.nan
-	df['merc_x'] = df[['lat','lon']].apply(lambda x: merc(x)[0],axis=1)
-	df['merc_y'] = df[['lat','lon']].apply(lambda x: merc(x)[1],axis=1)
+	df.loc[:, 'merc_x'] = np.nan
+	df.loc[:, 'merc_y'] = np.nan
+	df.loc[:, 'merc_x'] = df[['lat','lon']].apply(lambda x: merc(x)[0],axis=1)
+	df.loc[:, 'merc_y'] = df[['lat','lon']].apply(lambda x: merc(x)[1],axis=1)
 	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
 
 
@@ -345,36 +345,36 @@ def pd2gdf(df):
 	return traj
 
 
-def resample_and_calculate_velocity(gdf, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
+def resample_and_calculate_velocity(gdf, velocity_drop_alpha=3, rate = 1, res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, n_jobs=1):
 	if type(gdf) == pd.core.frame.DataFrame:
 		gdf = pd2gdf(gdf)
 
 	gdf['velocity'] = np.nan
 	cores = _get_n_jobs(n_jobs)
 	if cores==1:
-		gdf = _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=velocity_drop_alpha, res_rule=res_rule, res_method=res_method, crs=crs, drop_lon_lat=drop_lon_lat, resampling_first=resampling_first, drop_outliers=drop_outliers)
+		gdf = _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=velocity_drop_alpha, rate=rate, res_method=res_method, crs=crs, drop_lon_lat=drop_lon_lat, resampling_first=resampling_first, drop_outliers=drop_outliers)
 	else:
 		#TODO
 		gdf = parallelize_dataframe(gdf, _resample_and_calculate_velocity_grouped)
 	return gdf
 
 
-def _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False):
-	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_resample_and_calculate_velocity_vessel, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
+def _resample_and_calculate_velocity_grouped(gdf, velocity_drop_alpha=3, rate = 1, res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False):
+	gdf = gdf.groupby(['mmsi'], group_keys=False).apply(_resample_and_calculate_velocity_vessel, velocity_drop_alpha, rate, res_method, crs, drop_lon_lat, resampling_first, drop_outliers).reset_index(drop=True)
 	gdf.reset_index(inplace=True, drop=True)
 	return gdf
 
 
-def _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, res_rule, res_method, crs , drop_lon_lat, resampling_first, drop_outliers):
+def _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, rate, res_method, crs , drop_lon_lat, resampling_first, drop_outliers):
 	if len(vessel) == 1 :
 		vessel.velocity = vessel.speed
 		return vessel
 	if resampling_first:
-		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
+		vessel = resample_geospatial(vessel, rate=rate, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
 		vessel = calculate_velocity(vessel)
 	else:
 		vessel = calculate_velocity(vessel)
-		vessel = resample_geospatial(vessel, rule=res_rule, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
+		vessel = resample_geospatial(vessel, rate=rate, method=res_method, crs = crs, drop_lon_lat = drop_lon_lat)
 	if drop_outliers:
 		vessel = vessel.drop(get_outliers(vessel.velocity, alpha=velocity_drop_alpha)[0], axis=0)
 	# vessel.reset_index(inplace=True, drop=True)
@@ -416,9 +416,10 @@ def parallelize_dataframe(df, func, np_split=False, feature='mmsi', num_partitio
 	 return df
 
 
-def _pipeline_apply(vessel, ports, velocity_drop_alpha=3, res_rule = '60S', res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False ):
+def _pipeline_apply(vessel, ports, velocity_drop_alpha=3, rate = 1, res_method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False, resampling_first=True, drop_outliers=False, pois_alpha=-1, pois_window=100, semantic=False ):
 	'''
 	Full automated pipeline. To be used on a single mmsi, either manually, or using .groupby
+	Rate: Resampling rate in minutes
 	'''
 	vessel.drop_duplicates(['ts'], inplace=True)
 	vessel.sort_values('ts', inplace=True)
@@ -426,7 +427,7 @@ def _pipeline_apply(vessel, ports, velocity_drop_alpha=3, res_rule = '60S', res_
 	vessel.drop(['id', 'status'], axis=1, inplace=True, errors='ignore')
 	vessel['geom'] = vessel[['lon', 'lat']].apply(lambda x: Point(x[0],x[1]), axis=1)
 	vessel=  gpd.GeoDataFrame(vessel, geometry='geom')
-	vessel = _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, res_rule, res_method, crs, drop_lon_lat, resampling_first, drop_outliers)
+	vessel = _resample_and_calculate_velocity_vessel(vessel, velocity_drop_alpha, rate, res_method, crs, drop_lon_lat, resampling_first, drop_outliers)
 	vessel = _segment_vessel(vessel, ports, pois_alpha, pois_window, semantic)
 	return vessel
 
@@ -570,7 +571,7 @@ def __temporal_segment(vessel, temporal_threshold=12, cardinality_threshold=2):
 	return dfs_temporal
 
 
-def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, cardinality_threshold=2, resample_trips=False, rule = '60S', method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):                                               
+def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, temporal_threshold=12, cardinality_threshold=2, resample_trips=False, rate = 1, method='linear', crs = {'init': 'epsg:4326'}, drop_lon_lat = False):                                               
 	'''
 	After the Segmentation Stage, for each sub-trajectory:
 	  * we resample each trajectory
@@ -589,7 +590,7 @@ def segment_resample_v2(vessel, ports, port_epsg=2154, port_radius=2000, tempora
 				continue
 			# print (f'@Temporal-Segmentation BEFORE RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
 			# print (temporal_segmented_trajectories[idx].ts.diff().values)
-			temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rule=rule, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
+			temporal_segmented_trajectories[idx] = resample_geospatial(temporal_segmented_trajectories[idx], rate=rate, method=method, crs=crs, drop_lon_lat=drop_lon_lat)
 			# print (f'@Temporal-Segmentation AFTER RESAMPLING: {len(temporal_segmented_trajectories[idx])}')
 			# temporal_segmented_trajectories[idx] = calculate_velocity(temporal_segmented_trajectories[idx])
 
