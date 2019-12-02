@@ -47,10 +47,10 @@ def gdf_from_df_v2(df, coordinate_columns=['lon', 'lat'], crs={'init':'epsg:4326
 		Create a GeoDataFrame from a DataFrame in a much more generalized form.
 	'''
 	
-    df.loc[:, 'geom'] = np.nan
-    df.geom = df[coordinate_columns].apply(lambda x: Point(*x), axis=1)
-    
-    return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
+	df.loc[:, 'geom'] = np.nan
+	df.geom = df[coordinate_columns].apply(lambda x: Point(*x), axis=1)
+	
+	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
 
 
 def distance_to_nearest_port(point, ports):
@@ -80,35 +80,35 @@ def get_outliers(series, alpha = 3):
 
 # def resample_geospatial(df, features=['lat', 'lon'], rule='60S', method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
 def resample_geospatial(df, features=['lat', 'lon'], rate=1, method='linear', crs={'init': 'epsg:4326'}, drop_lon_lat=False):
-    df['datetime'] = pd.to_datetime(df['ts'], unit='s')
-    x = df['datetime'].values.astype(np.int64)
-    y = df[features].values
-    
-    # scipy interpolate needs at least 2 records 
-    if (len(df) <= 1):
-        return df.iloc[0:0]
-    
-    dt_start = df['datetime'].min().replace(second=0)
-    dt_end = df['datetime'].max().replace(second=0)
-    
-    f = interp1d(x, y, kind=method, axis=0)
+	df['datetime'] = pd.to_datetime(df['ts'], unit='s')
+	x = df['datetime'].values.astype(np.int64)
+	y = df[features].values
+	
+	# scipy interpolate needs at least 2 records 
+	if (len(df) <= 1):
+		return df.iloc[0:0]
+	
+	dt_start = df['datetime'].min().replace(second=0)
+	dt_end = df['datetime'].max().replace(second=0)
+	
+	f = interp1d(x, y, kind=method, axis=0)
 	# xnew_V2 = pd.date_range(start=df['datetime'].min().replace(second=0), end=df['datetime'].max().replace(second=0), freq=rule, closed='right')
-    xnew_V3 = pd.date_range(start=dt_start.replace(minute=rate*(dt_start.minute//rate)), end=dt_end, freq=f'{rate*60}S', closed='right') 
+	xnew_V3 = pd.date_range(start=dt_start.replace(minute=rate*(dt_start.minute//rate)), end=dt_end, freq=f'{rate*60}S', closed='right') 
    
-    
-    df_RESAMPLED = pd.DataFrame(f(xnew_V3), columns=features)      
-    df_RESAMPLED.loc[:, 'datetime'] = xnew_V3
-    
-    if (len(df_RESAMPLED) == 0):
-        df_RESAMPLED.insert(len(df_RESAMPLED.columns), 'geom', '')
-    else:
-        df_RESAMPLED.loc[:, 'geom'] = df_RESAMPLED[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
+	
+	df_RESAMPLED = pd.DataFrame(f(xnew_V3), columns=features)      
+	df_RESAMPLED.loc[:, 'datetime'] = xnew_V3
+	
+	if (len(df_RESAMPLED) == 0):
+		df_RESAMPLED.insert(len(df_RESAMPLED.columns), 'geom', '')
+	else:
+		df_RESAMPLED.loc[:, 'geom'] = df_RESAMPLED[['lon', 'lat']].apply(lambda x: Point(x[0], x[1]), axis=1)
 
-    #drop lat and lon if u like
-    if drop_lon_lat:
-        df_RESAMPLED = df_RESAMPLED.drop(['lat', 'lon'], axis=1)
-        
-    return gpd.GeoDataFrame(df_RESAMPLED, crs=crs, geometry='geom')
+	#drop lat and lon if u like
+	if drop_lon_lat:
+		df_RESAMPLED = df_RESAMPLED.drop(['lat', 'lon'], axis=1)
+		
+	return gpd.GeoDataFrame(df_RESAMPLED, crs=crs, geometry='geom')
 
 
 def calculate_angle(point1, point2):
