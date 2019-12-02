@@ -42,6 +42,17 @@ def gdf_from_df(df, crs=None):
 	return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
 
 
+def gdf_from_df_v2(df, coordinate_columns=['lon', 'lat'], crs={'init':'epsg:4326'}):
+	'''
+		Create a GeoDataFrame from a DataFrame in a much more generalized form.
+	'''
+	
+    df.loc[:, 'geom'] = np.nan
+    df.geom = df[coordinate_columns].apply(lambda x: Point(*x), axis=1)
+    
+    return gpd.GeoDataFrame(df, geometry='geom', crs=crs)
+
+
 def distance_to_nearest_port(point, ports):
 	'''
 	Calculates the minimum distance between the point and the lists of ports. Can be used to determine if the ship is sailing or not.
