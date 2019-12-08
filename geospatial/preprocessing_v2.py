@@ -160,39 +160,50 @@ def __fix_traj_ids__(traj_sgdf):
 
 
 
-def classify_spatial_proximity():
-	pass
-
-
-
-def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', area_radius=2000, area_epsg=2154):
-    '''
-    Segment trajectories based on port entrance/exit
-    '''
-    sindex = trajectories.sindex # create the spatial index (r-tree) of the trajectories's data points
-
-    if (spatial_areas.geom.type == 'Point').all():
-        spatial_areas = create_area_bounds(spatial_areas, area_radius=area_radius, epsg=area_epsg)
-
+def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', area_radius=2000, area_epsg=2154):
+    # create the spatial index (r-tree) of the trajectories's data points
+    sindex = trajectories.sindex 
+  
     # find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
     points_within_geometry = pd.DataFrame()
-    for poly in tqdm(spatial_areas.geom, desc='Classifying Spatial Proximity'):
+    
+    if (spatial_areas.geom.type == 'Point').all():
+        spatial_areas = create_area_bounds(spatial_areas, area_radius=area_radius, epsg=area_epsg)
+    
+    for poly in tqdm(spatial_areas.itertuples(), desc='Classifying Spatial Proximity'):
+    # for poly in spatial_areas.itertuples():
         # find approximate matches with r-tree, then precise matches from those approximate ones
-        possible_matches_index = list(sindex.intersection(poly.bounds))
+        possible_matches_index = list(sindex.intersection(poly.geom.bounds))
         possible_matches = trajectories.iloc[possible_matches_index]
-        precise_matches = possible_matches[possible_matches.intersects(poly)]
+        precise_matches = possible_matches[possible_matches.intersects(poly.geom)]
+        
+        if (precise_matches.empty):
+            continue
+            
+        trajectories.loc[precise_matches.index, 'area_id'] = poly.Index
         points_within_geometry = points_within_geometry.append(precise_matches)
-
+        
     points_within_geometry = points_within_geometry.drop_duplicates(subset=[o_id_column, ts_column])
     points_outside_geometry = trajectories[~trajectories.isin(points_within_geometry)].dropna(how='all')
 
-    trajectories.loc[:,'traj_id'] = np.nan
     # When we create the _traj_id_ column, we label each record with 0, 
     # if it's outside the port's radius and -1 if it's inside the port's radius. 
     trajectories.loc[trajectories.index.isin(points_within_geometry.index), 'traj_id'] = -1
     trajectories.loc[trajectories.index.isin(points_outside_geometry.index), 'traj_id'] = 0
     trajectories.loc[:,'label'] = trajectories.loc[:, 'traj_id'].values
+    
+    return trajectories
 
+
+
+def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', classify_points=True, area_radius=2000, area_epsg=2154):
+    '''
+    Segment trajectories based on area proximity
+    '''
+    
+    if classify_points:
+        classify_area_proximity(trajectories, spatial_areas, o_id_column=o_id_column, ts_column=ts_column, area_radius=area_radius, area_epsg=area_epsg)
+    
     tqdm.pandas()
     # We drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
     #     trajectories = trajectories.loc[trajectories.traj_id[trajectories.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
