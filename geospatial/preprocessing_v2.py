@@ -10,6 +10,8 @@ from collections import Counter
 import math
 
 
+
+
 def haversine(p_1, p_2):
 	'''
 		Return the Haversine Distance of two points in KM
@@ -124,7 +126,6 @@ def calculate_bearing(gdf):
 	return gdf  
 
 
-
 def create_area_bounds(spatial_areas, epsg=2154, area_radius=2000):
 	'''
 	Given some Datapoints, create a circular bound of _area_radius_ kilometers.
@@ -136,28 +137,6 @@ def create_area_bounds(spatial_areas, epsg=2154, area_radius=2000):
 	spatial_areas2.loc[:, 'geom'] = spatial_areas2.geom.to_crs(epsg=epsg).buffer(area_radius).to_crs(init_crs)
 	# After we create the spatial_areas bounding circle we convert back to its previous CRS.
 	return spatial_areas2
-
-
-def __fix_traj_ids__(traj_sgdf):
-    traj_sgdf.reset_index(inplace=True, drop=True)
-    dfs = np.split(traj_sgdf, traj_sgdf.loc[traj_sgdf.traj_id == -1].index)
-    # print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
-    dfs = [df for df in dfs if len(df) != 0]    # remove the fragments that have at most 1 point
-    # print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
-
-    if (len(dfs) == 0):
-        return traj_sgdf.iloc[0:0]
-
-    dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
-    # then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
-    for i in range(1,len(dfs)):        
-            if (len(dfs[i]) == 1):
-                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()
-            else:
-                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()+1
-
-    return pd.concat(dfs)
-
 
 
 def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', area_radius=2000, area_epsg=2154):
@@ -195,6 +174,26 @@ def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_co
     return trajectories
 
 
+def __fix_traj_ids__(traj_sgdf):
+    traj_sgdf.reset_index(inplace=True, drop=True)
+    dfs = np.split(traj_sgdf, traj_sgdf.loc[traj_sgdf.traj_id == -1].index)
+    # print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
+    dfs = [df for df in dfs if len(df) != 0]    # remove the fragments that have at most 1 point
+    # print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
+
+    if (len(dfs) == 0):
+        return traj_sgdf.iloc[0:0]
+
+    dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
+    # then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
+    for i in range(1,len(dfs)):        
+            if (len(dfs[i]) == 1):
+                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()
+            else:
+                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()+1
+
+    return pd.concat(dfs)
+
 
 def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', classify_points=True, area_radius=2000, area_epsg=2154):
     '''
@@ -214,3 +213,39 @@ def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_colum
     df_fn.reset_index(inplace=True, drop=True)
 
     return df_fn
+
+
+def temporal_segmentation(trajectories, temporal_threshold=12, cardinality_threshold=2, o_id_column='id', ts_column='t_msec'):
+    if len(trajectories) == 0:
+        trajectories.loc[:, 'trip_id'] = None
+        return [trajectories.iloc[0:0]]
+
+    print(f"Object ID :{trajectories[o_id_column].unique()[0]}")
+    print(f"Segments Before: {len(trajectories.loc[:, 'traj_id'].unique())}")
+    
+    trajectories.loc[:, 'trip_id'] = 0
+    trajectories.sort_values([ts_column], ascending=True, inplace=True)
+
+    dfs_temporal = []
+    for traj_id, sdf in trajectories.groupby('traj_id'):
+        df = sdf.reset_index(drop=True)
+        
+		# break_points = df[ts_column].diff(-1).abs().index[df[ts_column].diff()>60*60*temporal_threshold]
+        break_points = df.loc[df[ts_column].diff() > 60*60*temporal_threshold].index
+
+        dfs = np.split(df, break_points)
+        dfs_temporal.extend(dfs)
+
+    # print (f'@Temporal-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
+    dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= cardinality_threshold]
+    # print (f'@Temporal-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
+    print(f"Segments After: {len(dfs_temporal)}")
+
+    if (len(dfs_temporal) == 0):
+        return [trajectories.iloc[0:0]]
+
+    dfs_temporal[0].loc[:,'trip_id'] = 0
+    for idx in range(1, len(dfs_temporal)):
+        dfs_temporal[idx].loc[:,'trip_id'] = dfs_temporal[idx-1].trip_id.max() + 1
+
+    return pd.concat(dfs_temporal)
