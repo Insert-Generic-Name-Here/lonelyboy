@@ -140,112 +140,110 @@ def create_area_bounds(spatial_areas, epsg=2154, area_radius=2000):
 
 
 def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', area_radius=2000, area_epsg=2154):
-    # create the spatial index (r-tree) of the trajectories's data points
-    sindex = trajectories.sindex 
-  
-    # find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
-    points_within_geometry = pd.DataFrame()
-    
-    if (spatial_areas.geom.type == 'Point').all():
-        spatial_areas = create_area_bounds(spatial_areas, area_radius=area_radius, epsg=area_epsg)
-    
-    for poly in tqdm(spatial_areas.itertuples(), desc='Classifying Spatial Proximity'):
-    # for poly in spatial_areas.itertuples():
-        # find approximate matches with r-tree, then precise matches from those approximate ones
-        possible_matches_index = list(sindex.intersection(poly.geom.bounds))
-        possible_matches = trajectories.iloc[possible_matches_index]
-        precise_matches = possible_matches[possible_matches.intersects(poly.geom)]
-        
-        if (precise_matches.empty):
-            continue
-            
-        trajectories.loc[precise_matches.index, 'area_id'] = poly.Index
-        points_within_geometry = points_within_geometry.append(precise_matches)
-        
-    points_within_geometry = points_within_geometry.drop_duplicates(subset=[o_id_column, ts_column])
-    points_outside_geometry = trajectories[~trajectories.isin(points_within_geometry)].dropna(how='all')
+	# create the spatial index (r-tree) of the trajectories's data points
+	print ('Creating Spatial Index...')
+	sindex = trajectories.sindex
 
-    # When we create the _traj_id_ column, we label each record with 0, 
-    # if it's outside the port's radius and -1 if it's inside the port's radius. 
-    trajectories.loc[trajectories.index.isin(points_within_geometry.index), 'traj_id'] = -1
-    trajectories.loc[trajectories.index.isin(points_outside_geometry.index), 'traj_id'] = 0
-    trajectories.loc[:,'label'] = trajectories.loc[:, 'traj_id'].values
-    
-    return trajectories
+	# find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
+	points_within_geometry = pd.DataFrame()
+	
+	if (spatial_areas.geom.type == 'Point').all():
+		spatial_areas = create_area_bounds(spatial_areas, area_radius=area_radius, epsg=area_epsg)
+	
+	print ('Classifying Spatial Proximity...')
+	for airport_id, poly in spatial_areas.geom.items():
+		possible_matches_index = list(sindex.intersection(poly.bounds))
+		possible_matches = trajectories.iloc[possible_matches_index]
+		precise_matches = possible_matches[possible_matches.intersects(poly)]
+		
+		if (len(precise_matches) != 0):
+			trajectories.loc[precise_matches.index, 'area_id'] = airport_id
+			points_within_geometry = points_within_geometry.append(precise_matches)
+		
+	print ('Gathering Results...')
+	points_within_geometry = points_within_geometry.drop_duplicates(subset=[o_id_column, ts_column])
+
+	# When we create the _traj_id_ column, we label each record with 0, 
+	# if it's outside the port's radius and -1 if it's inside the port's radius. 
+	trajectories.loc[trajectories.index.isin(points_within_geometry.index), 'traj_id'] = -1
+	trajectories.loc[~trajectories.index.isin(points_within_geometry.index), 'traj_id'] = 0
+	trajectories.loc[:,'label'] = trajectories['traj_id'].values
+	
+	return trajectories
 
 
 def __fix_traj_ids__(traj_sgdf):
-    traj_sgdf.reset_index(inplace=True, drop=True)
-    dfs = np.split(traj_sgdf, traj_sgdf.loc[traj_sgdf.traj_id == -1].index)
-    # print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
-    dfs = [df for df in dfs if len(df) != 0]    # remove the fragments that have at most 1 point
-    # print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
+	traj_sgdf.reset_index(inplace=True, drop=True)
+	dfs = np.split(traj_sgdf, traj_sgdf.loc[traj_sgdf.traj_id == -1].index)
+	# print (f'@Port-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
+	dfs = [df for df in dfs if len(df) != 0]    # remove the fragments that have at most 1 point
+	# print (f'@Port-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs]}')
 
-    if (len(dfs) == 0):
-        return traj_sgdf.iloc[0:0]
+	if (len(dfs) == 0):
+		return traj_sgdf.iloc[0:0]
 
-    dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
-    # then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
-    for i in range(1,len(dfs)):        
-            if (len(dfs[i]) == 1):
-                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()
-            else:
-                    dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()+1
+	dfs[0].loc[:,'traj_id'] = 0    # ensure that the points in the first segments have the starting ID (0)
+	# then for each sub-trajectory, we assign an incrementing number (id) to each trajectory segment, starting from 0 
+	for i in range(1,len(dfs)):        
+			if (len(dfs[i]) == 1):
+					dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()
+			else:
+					dfs[i].loc[:,'traj_id'] = dfs[i-1].loc[:, 'traj_id'].max()+1
 
-    return pd.concat(dfs)
+	return pd.concat(dfs)
 
 
 def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_column='t_msec', classify_points=True, area_radius=2000, area_epsg=2154):
-    '''
-    Segment trajectories based on area proximity
-    '''
-    
-    if classify_points:
-        classify_area_proximity(trajectories, spatial_areas, o_id_column=o_id_column, ts_column=ts_column, area_radius=area_radius, area_epsg=area_epsg)
-    
-    tqdm.pandas()
-    # We drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
-    #     trajectories = trajectories.loc[trajectories.traj_id[trajectories.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
-    trajectories = trajectories.groupby(o_id_column, group_keys=False).progress_apply(lambda gdf: gdf.loc[gdf.traj_id[gdf.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index])
+	'''
+	Segment trajectories based on area proximity
+	'''
+	
+	if classify_points:
+		classify_area_proximity(trajectories, spatial_areas, o_id_column=o_id_column, ts_column=ts_column, area_radius=area_radius, area_epsg=area_epsg)
+	
+	tqdm.pandas()
+	# We drop the consecutive -1 rows, except the first and last one, and segment the trajectory by the remaining -1 points
+	#     trajectories = trajectories.loc[trajectories.traj_id[trajectories.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index]
+	trajectories = trajectories.groupby(o_id_column, group_keys=False).progress_apply(lambda gdf: gdf.loc[gdf.traj_id[gdf.traj_id.replace(-1,np.nan).ffill(limit=1).bfill(limit=1).notnull()].index])
 
-    df_fn = trajectories.groupby(o_id_column).progress_apply(__fix_traj_ids__)
-    df_fn.sort_values(ts_column, inplace=True)
-    df_fn.reset_index(inplace=True, drop=True)
+	df_fn = trajectories.groupby(o_id_column).progress_apply(__fix_traj_ids__)
+	df_fn.sort_values(ts_column, inplace=True)
+	df_fn.reset_index(inplace=True, drop=True)
 
-    return df_fn
+	return df_fn
 
 
 def temporal_segmentation(trajectories, temporal_threshold=12, cardinality_threshold=2, o_id_column='id', ts_column='t_msec'):
-    if len(trajectories) == 0:
-        trajectories.loc[:, 'trip_id'] = None
-        return [trajectories.iloc[0:0]]
+	if len(trajectories) == 0:
+		trajectories.loc[:, 'trip_id'] = None
+		return trajectories.iloc[0:0]
+	
+	print(f"Object ID :{trajectories[o_id_column].unique()[0]}")
+	print(f"Segments Before: {len(trajectories.loc[:, 'traj_id'].unique())}")
+		
+	trajectories.loc[:, 'trip_id'] = 0
+	trajectories.sort_values([ts_column], ascending=True, inplace=True)
 
-    print(f"Object ID :{trajectories[o_id_column].unique()[0]}")
-    print(f"Segments Before: {len(trajectories.loc[:, 'traj_id'].unique())}")
-    
-    trajectories.loc[:, 'trip_id'] = 0
-    trajectories.sort_values([ts_column], ascending=True, inplace=True)
-
-    dfs_temporal = []
-    for traj_id, sdf in trajectories.groupby('traj_id'):
-        df = sdf.reset_index(drop=True)
-        
+	dfs_temporal = []
+	for traj_id, sdf in trajectories.groupby('traj_id'):
+		df = sdf.reset_index(drop=True)
+		
 		# break_points = df[ts_column].diff(-1).abs().index[df[ts_column].diff()>60*60*temporal_threshold]
-        break_points = df.loc[df[ts_column].diff() > 60*60*temporal_threshold].index
+		break_points = df.loc[df[ts_column].diff() > 60*60*temporal_threshold].index
 
-        dfs = np.split(df, break_points)
-        dfs_temporal.extend(dfs)
+		dfs = np.split(df, break_points)
+		dfs_temporal.extend(dfs)
 
-    # print (f'@Temporal-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
-    dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= cardinality_threshold]
-    # print (f'@Temporal-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
-    print(f"Segments After: {len(dfs_temporal)}")
+	# print (f'@Temporal-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
+	dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= cardinality_threshold]
+	# print (f'@Temporal-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
+	print(f"Segments After: {len(dfs_temporal)}")
 
-    if (len(dfs_temporal) == 0):
-        return [trajectories.iloc[0:0]]
+	if (len(dfs_temporal) == 0):
+		return trajectories.iloc[0:0]
 
-    dfs_temporal[0].loc[:,'trip_id'] = 0
-    for idx in range(1, len(dfs_temporal)):
-        dfs_temporal[idx].loc[:,'trip_id'] = dfs_temporal[idx-1].trip_id.max() + 1
+	dfs_temporal[0].loc[:,'trip_id'] = 0
+	for idx in range(1, len(dfs_temporal)):
+		dfs_temporal[idx].loc[:,'trip_id'] = dfs_temporal[idx-1].trip_id.max() + 1
 
-    return pd.concat(dfs_temporal)
+	return pd.concat(dfs_temporal)
