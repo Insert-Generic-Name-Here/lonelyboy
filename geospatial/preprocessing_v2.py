@@ -104,14 +104,17 @@ def calculate_angle(point1, point2):
 	return theta_deg
 
 
-def calculate_bearing(gdf):
+def calculate_bearing(gdf, course_column='course'):
 	'''
 	Return given dataframe with an extra bearing column that
 	is calculated using the course over ground (in degrees in range [0, 360))
 	'''
 	# if there is only one point in the trajectory its bearing will be the one measured from the accelerometer
 	if len(gdf) == 1:
-		gdf.loc[:, 'bearing'] = gdf.course
+		if course_column is not None:
+			gdf.loc[:, 'bearing'] = gdf[course_column]
+		else:
+			gdf.loc[:, 'bearing'] = np.nan
 		return gdf
 
 	# create columns for current and next location. Drop the last columns that contains the nan value
