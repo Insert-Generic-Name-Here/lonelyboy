@@ -61,7 +61,10 @@ def calculate_velocity(gdf, spd_column='velocity', ts_column='ts'):
 	'''
 	# if there is only one point in the trajectory its velocity will be the one measured from the speedometer
 	if len(gdf) == 1:
-		gdf.loc[:, 'velocity'] = gdf[spd_column]
+		if spd_column is not None:
+			gdf.loc[:, 'velocity'] = gdf[spd_column]
+		else:
+			gdf.loc[:, 'velocity'] = np.nan
 		return gdf
 
 	# create columns for current and next location. Drop the last columns that contains the nan value
