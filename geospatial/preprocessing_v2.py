@@ -151,7 +151,7 @@ def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_co
 	sindex = trajectories.sindex
 
 	# find the points that intersect with each subpolygon and add them to _points_within_geometry_ DataFrame
-	points_within_geometry = pd.DataFrame()
+	points_within_geometry = []
 	
 	if (spatial_areas.geom.type == 'Point').all():
 		spatial_areas = create_area_bounds(spatial_areas, area_radius=area_radius, epsg=area_epsg)
@@ -164,13 +164,14 @@ def classify_area_proximity(trajectories, spatial_areas, o_id_column='id', ts_co
 		
 		if (len(precise_matches) != 0):
 			trajectories.loc[precise_matches.index, 'area_id'] = airport_id
-			points_within_geometry = points_within_geometry.append(precise_matches)
+			points_within_geometry.append(trajectories.loc[precise_matches.index])
 		
 	print ('Gathering Results...')
+	points_within_geometry = pd.concat(points_within_geometry)
 	points_within_geometry = points_within_geometry.drop_duplicates(subset=[o_id_column, ts_column])
 
 	# When we create the _traj_id_ column, we label each record with 0, 
-	# if it's outside the port's radius and -1 if it's inside the port's radius. 
+	# if it's outside the port's radius and -1 if it's inside the port's radius.
 	trajectories.loc[trajectories.index.isin(points_within_geometry.index), 'traj_id'] = -1
 	trajectories.loc[~trajectories.index.isin(points_within_geometry.index), 'traj_id'] = 0
 	trajectories.loc[:,'label'] = trajectories['traj_id'].values
@@ -219,14 +220,11 @@ def spatial_segmentation(trajectories, spatial_areas, o_id_column='id', ts_colum
 	return df_fn
 
 
-def temporal_segmentation(trajectories, temporal_threshold=12, cardinality_threshold=2, o_id_column='id', ts_column='t_msec'):
+def temporal_segmentation(trajectories, temporal_threshold=12, cardinality_threshold=2, o_id_column='id', ts_column='t_msec', verbose=True):
 	if len(trajectories) == 0:
 		trajectories.loc[:, 'trip_id'] = None
 		return trajectories.iloc[0:0]
-	
-	print(f"Object ID :{trajectories[o_id_column].unique()[0]}")
-	print(f"Segments Before: {len(trajectories.loc[:, 'traj_id'].unique())}")
-		
+
 	trajectories.loc[:, 'trip_id'] = 0
 	trajectories.sort_values([ts_column], ascending=True, inplace=True)
 
@@ -243,7 +241,11 @@ def temporal_segmentation(trajectories, temporal_threshold=12, cardinality_thres
 	# print (f'@Temporal-Segmentation BEFORE FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
 	dfs_temporal = [tmp_df for tmp_df in dfs_temporal if len(tmp_df) >= cardinality_threshold]
 	# print (f'@Temporal-Segmentation AFTER FILTERING: {[len(tmp_df) for tmp_df in dfs_temporal]}')
-	print(f"Segments After: {len(dfs_temporal)}")
+
+	if (verbose == True):
+		print(f"Object ID :{trajectories[o_id_column].unique()[0]}")
+		print(f"Segments Before: {len(trajectories.loc[:, 'traj_id'].unique())}")	
+		print(f"Segments After: {len(dfs_temporal)}")
 
 	if (len(dfs_temporal) == 0):
 		return trajectories.iloc[0:0]
